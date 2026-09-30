@@ -2116,7 +2116,26 @@
         function selectedMeetingTargets(){return[...document.querySelectorAll('.meeting-target-check:checked')].map(x=>x.value)}
         function openNewMeetingModal(){editingMeetingId=null;document.getElementById('meeting-title').value='';document.getElementById('meeting-details').value='';document.getElementById('meeting-time').value='';renderMeetingTargetMembers();openModal('meeting-modal')}
         function openMeetingForEdit(id){const m=(dbCache.meetings[dbCache.currentOrgCode]||[]).find(x=>x.id===id);if(!m)return;editingMeetingId=id;document.getElementById('meeting-title').value=m.title;document.getElementById('meeting-details').value=m.details||'';document.getElementById('meeting-time').value=m.time;const sel=document.getElementById('meeting-loc-select');if(['학생회실','컨퍼런스홀'].includes(m.loc)){sel.value=m.loc;toggleMeetingCustomLoc(m.loc)}else{sel.value='기타';toggleMeetingCustomLoc('기타');document.getElementById('meeting-custom-loc').value=m.loc}renderMeetingTargetMembers(m.targets||null);openModal('meeting-modal')}
-        async function sendCouncilPush(kind,title,body,targetNames=null){try{const sb=requireSupabase();if(!sb)return;const{data:{session}}=await sb.auth.getSession();if(!session)return;await fetch(`${SUPABASE_URL}/functions/v1/send-council-push`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`,'apikey':SUPABASE_ANON_KEY},body:JSON.stringify({orgCode:dbCache.currentOrgCode,kind,title,body,targetNames})})}catch(e){console.warn('푸시 실패',e)}}
+        async function sendCouncilPush(kind,title,body,targetNames=null){
+            try{
+                const sb=requireSupabase();
+                if(!sb) return false;
+                const {data,error}=await sb.functions.invoke('send-council-push',{
+                    body:{orgCode:dbCache.currentOrgCode,kind,title,body,targetNames}
+                });
+                if(error){
+                    console.error('공지/회의 푸시 함수 호출 실패:',error);
+                    showAlert('공지/회의는 저장됐지만 푸시 발송에 실패했습니다.');
+                    return false;
+                }
+                console.log('공지/회의 푸시 결과:',data);
+                return true;
+            }catch(e){
+                console.error('공지/회의 푸시 실패:',e);
+                showAlert('공지/회의는 저장됐지만 푸시 발송에 실패했습니다.');
+                return false;
+            }
+        }
         async function submitMeeting(){const title=document.getElementById('meeting-title').value.trim(),details=document.getElementById('meeting-details').value.trim();let loc=document.getElementById('meeting-loc-select').value;if(loc==='기타')loc=document.getElementById('meeting-custom-loc').value.trim()||'기타 장소';const time=document.getElementById('meeting-time').value,targets=selectedMeetingTargets();if(!title||!time)return showAlert('제목과 시간을 입력해주세요.');if(!targets.length)return showAlert('소집 회원을 선택해주세요.');const list=(dbCache.meetings[dbCache.currentOrgCode]||=[]);if(editingMeetingId){const m=list.find(x=>x.id===editingMeetingId);Object.assign(m,{title,details,loc,time,targets});await sendCouncilPush('meeting',`회의 수정: ${title}`,`${time.replace('T',' ')} · ${loc}`,targets);editingMeetingId=null}else{list.unshift({id:Date.now(),title,details,loc,time,targets,rsvps:{},rsvpReasons:{}});await sendCouncilPush('meeting',`회의 소집: ${title}`,`${time.replace('T',' ')} · ${loc}`,targets)}await syncSubColToFirestore('meetings',dbCache.currentOrgCode,list);closeModal('meeting-modal');if(currentTab==='meetings')renderMeetingList();showAlert('회의가 저장되었습니다.')}
         function deleteMeeting(id){if(!confirm('이 회의를 삭제하시겠습니까?'))return;dbCache.meetings[dbCache.currentOrgCode]=(dbCache.meetings[dbCache.currentOrgCode]||[]).filter(x=>x.id!==id);syncSubColToFirestore('meetings',dbCache.currentOrgCode,dbCache.meetings[dbCache.currentOrgCode]);renderMeetingList()}
         function handleRSVP(mid,status){const list=dbCache.meetings[dbCache.currentOrgCode]||[],m=list.find(x=>x.id===mid);if(!m)return;if(Array.isArray(m.targets)&&!m.targets.includes(dbCache.currentUser.name))return showAlert('소집 대상자가 아닙니다.');m.rsvps||={};m.rsvpReasons||={};if(status==='불참'){const reason=prompt('불참 사유를 입력해주세요.');if(reason===null)return;if(!reason.trim())return showAlert('사유를 입력해주세요.');m.rsvpReasons[dbCache.currentUser.name]=reason.trim()}else delete m.rsvpReasons[dbCache.currentUser.name];m.rsvps[dbCache.currentUser.name]=status;syncSubColToFirestore('meetings',dbCache.currentOrgCode,list);renderMeetingList()}
