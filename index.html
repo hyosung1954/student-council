@@ -459,6 +459,11 @@
                         <label class="block font-bold text-slate-700 mb-1">지도 시간 (5분 단위)</label>
                         <input id="duty-time" type="time" step="300" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold" value="08:00">
                     </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">배정 종료일</label>
+                        <input id="duty-end-date" type="date" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold">
+                        <p class="text-[10px] text-slate-400 mt-1">선택한 날짜까지만 매주 해당 요일의 지도가 배정됩니다.</p>
+                    </div>
                     <button onclick="submitDutySchedule()" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm transition shadow-sm mt-2">일정 등록 및 배정</button>
                 </div>
             </div>
@@ -1205,6 +1210,12 @@
                             </div>
                             ${isAdmin ? `<button onclick="openDutyModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3.5 py-2 rounded-xl font-bold transition shadow-sm">+ 일정 배정</button>` : ''}
                         </div>
+                        ${isAdmin ? `<div class="bg-amber-50 border border-amber-200 rounded-2xl p-3 space-y-2">
+                            <div class="font-bold text-amber-800">지도 중지</div>
+                            <p class="text-[11px] text-slate-600">공휴일·휴업일 등에 사용합니다. 오늘부터 선택한 날짜까지 지도 일정·지도 출석만 중지되고 다른 기능은 그대로 작동합니다.</p>
+                            <div class="flex gap-2"><input id="duty-pause-until" type="date" class="flex-1 bg-white border border-amber-200 px-3 py-2 rounded-xl"><button onclick="pauseDutiesUntil()" class="px-3 py-2 bg-amber-600 text-white rounded-xl font-bold">중지</button></div>
+                            <div id="duty-pause-status"></div>
+                        </div>` : ''}
                         <div id="duty-schedule-list" class="space-y-3"></div>
                         <div class="border-t border-slate-200 pt-3">
                             <h3 class="text-xs font-bold text-slate-700 mb-2">대타(스왑) 신청 현황</h3>
@@ -1317,6 +1328,15 @@
                         </div>` : ''}
 
                         <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+                            <h3 class="font-bold text-slate-700"><i class="fa-solid fa-bell mr-1"></i> 지도 전날 알림</h3>
+                            <p class="text-slate-600 leading-relaxed">기상 알람이 아니라, 다음 날 지도 일정이 있다는 것을 미리 알려주는 짧은 알림입니다. ON이면 지정한 시간에 알림을 확인합니다.</p>
+                            <label class="flex items-center justify-between bg-slate-50 p-3 rounded-xl"><span class="font-bold">알림 ON/OFF</span><input id="guide-reminder-enabled" type="checkbox" onchange="saveGuideReminderSettings()"></label>
+                            <div><label class="block text-[11px] font-semibold text-slate-600 mb-1">전날 알림 시간</label><input id="guide-reminder-time" type="time" value="20:00" onchange="saveGuideReminderSettings()" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold"></div>
+                            <button onclick="requestGuideNotificationPermission()" class="w-full py-2.5 bg-indigo-50 text-indigo-600 rounded-xl font-bold">휴대폰 알림 권한 허용</button>
+                            <p class="text-[10px] text-slate-400">브라우저 정책상 이 버전은 사이트/PWA가 실행 중일 때 알림을 확인합니다. 사이트를 완전히 종료한 상태에서도 자동 푸시를 받으려면 별도의 푸시 서버 설정이 필요합니다.</p>
+                        </div>
+
+                        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
                             <h3 class="font-bold text-slate-700"><i class="fa-solid fa-mobile-screen mr-1"></i> 홈 화면 앱 설치 가이드</h3>
                             <p class="text-slate-600 leading-relaxed">사파리(Safari) 또는 크롬에서 공유 버튼을 눌러 <b>[홈 화면에 추가]</b>를 하시면 클라우드 연동 앱처럼 간편하게 사용할 수 있습니다.</p>
                         </div>
@@ -1327,6 +1347,7 @@
                         </div>
                     </div>
                 `;
+                setTimeout(loadGuideReminderSettings, 0);
             }
         }
 
@@ -1414,6 +1435,12 @@
             const select = document.getElementById('duty-member-select');
             if (org && select) {
                 select.innerHTML = org.members.map(m => `<option value="${m.name}">${m.name} (${m.role})</option>`).join('');
+            }
+            const end = document.getElementById('duty-end-date');
+            if (end && !end.value) {
+                const d = kstDateAdd(localDateStr(), 30);
+                end.value = d;
+                end.min = localDateStr();
             }
             openModal('duty-modal');
         }
@@ -1825,58 +1852,95 @@
         }
 
         async function submitDutySchedule() {
+            if (!currentUserIsAdmin()) return showAlert('관리자만 선도 일정을 배정할 수 있습니다.');
             const day = document.getElementById('duty-day').value;
             const dutyType = document.getElementById('duty-type').value;
             const memberName = canonicalMemberName(document.getElementById('duty-member-select').value);
             const time = document.getElementById('duty-time').value;
-            if (!memberName || !time) return showAlert('담당 학생과 시간을 모두 선택해주세요.');
+            const endDate = document.getElementById('duty-end-date').value;
+            if (!memberName || !time || !endDate) return showAlert('담당 학생, 시간, 배정 종료일을 모두 선택해주세요.');
+            if (endDate < localDateStr()) return showAlert('배정 종료일은 오늘 이후로 설정해주세요.');
+
             const list = (dbCache.duties[dbCache.currentOrgCode] ||= []);
-            const same = list.filter(d => d.day === day && d.dutyType === dutyType && canonicalMemberName(d.memberName) === memberName);
+            const same = list.filter(d => d.kind !== 'pause' && d.day === day && d.dutyType === dutyType && canonicalMemberName(d.memberName) === memberName);
             if (same.length) {
                 const keep = same[0];
-                keep.memberName = memberName;
-                keep.time = time;
-                dbCache.duties[dbCache.currentOrgCode] = list.filter(d => d === keep || !(d.day === day && d.dutyType === dutyType && canonicalMemberName(d.memberName) === memberName));
+                Object.assign(keep, {memberName, time, endDate, startDate: keep.startDate || localDateStr()});
+                dbCache.duties[dbCache.currentOrgCode] = list.filter(d => d === keep || d.kind === 'pause' || !(d.day === day && d.dutyType === dutyType && canonicalMemberName(d.memberName) === memberName));
                 await syncSubColToFirestore('duties', dbCache.currentOrgCode, dbCache.duties[dbCache.currentOrgCode]);
                 closeModal('duty-modal'); renderDutyScheduleList(); updateHomeDashboardData();
-                return showAlert('같은 요일·지도 유형의 기존 일정을 새 시간으로 변경했습니다.');
+                return showAlert(`기존 일정을 ${endDate}까지로 변경했습니다.`);
             }
-            list.unshift({ id: Date.now(), day, dutyType, memberName, time });
+            list.unshift({ id: Date.now(), kind:'duty', day, dutyType, memberName, time, startDate: localDateStr(), endDate });
             await syncSubColToFirestore('duties', dbCache.currentOrgCode, list);
-            closeModal('duty-modal'); renderDutyScheduleList(); updateHomeDashboardData(); showAlert('선도 지도 일정이 배정되었습니다.');
+            closeModal('duty-modal'); renderDutyScheduleList(); updateHomeDashboardData();
+            showAlert(`${endDate}까지 선도 지도 일정이 배정되었습니다.`);
+        }
+
+        function getDutyPause(){
+            const today = localDateStr();
+            return (dbCache.duties[dbCache.currentOrgCode] || []).find(x => x.kind === 'pause' && x.startDate <= today && today <= x.endDate) || null;
+        }
+        function isDutyPausedOn(dateStr){
+            return (dbCache.duties[dbCache.currentOrgCode] || []).some(x => x.kind === 'pause' && x.startDate <= dateStr && dateStr <= x.endDate);
+        }
+        async function pauseDutiesUntil(){
+            if (!currentUserIsAdmin()) return showAlert('관리자만 지도를 중지할 수 있습니다.');
+            const endDate = document.getElementById('duty-pause-until')?.value;
+            if (!endDate) return showAlert('지도 중지 종료일을 선택해주세요.');
+            const today = localDateStr();
+            if (endDate < today) return showAlert('오늘 이후 날짜를 선택해주세요.');
+            const list = (dbCache.duties[dbCache.currentOrgCode] ||= []);
+            dbCache.duties[dbCache.currentOrgCode] = list.filter(x => x.kind !== 'pause');
+            dbCache.duties[dbCache.currentOrgCode].unshift({id:Date.now(), kind:'pause', startDate:today, endDate});
+            await syncSubColToFirestore('duties', dbCache.currentOrgCode, dbCache.duties[dbCache.currentOrgCode]);
+            renderDutyScheduleList(); updateHomeDashboardData();
+            showAlert(`오늘부터 ${endDate}까지 지도 일정과 지도 출석을 중지했습니다.`);
+        }
+        async function resumeDuties(){
+            if (!currentUserIsAdmin()) return showAlert('관리자만 지도 중지를 해제할 수 있습니다.');
+            dbCache.duties[dbCache.currentOrgCode] = (dbCache.duties[dbCache.currentOrgCode] || []).filter(x => x.kind !== 'pause');
+            await syncSubColToFirestore('duties', dbCache.currentOrgCode, dbCache.duties[dbCache.currentOrgCode]);
+            renderDutyScheduleList(); updateHomeDashboardData(); showAlert('지도 중지를 해제했습니다.');
         }
 
         function renderDutyScheduleList() {
             const container = document.getElementById('duty-schedule-list'); if (!container) return;
-            const list = dbCache.duties[dbCache.currentOrgCode] || [];
+            const all = dbCache.duties[dbCache.currentOrgCode] || [];
+            const list = all.filter(x => x.kind !== 'pause');
+            const pause = getDutyPause();
+            const status = document.getElementById('duty-pause-status');
+            if (status) status.innerHTML = pause ? `<div class="text-amber-700 font-bold">현재 ${pause.endDate}까지 지도 중지 중 <button onclick="resumeDuties()" class="ml-2 underline">지금 해제</button></div>` : '<div class="text-slate-500">현재 지도 중지 없음</div>';
             if (!list.length) { container.innerHTML='<p class="text-center text-xs text-slate-400 py-6">배정된 선도 지도 일정이 없습니다.</p>'; return; }
 
-            // 앞으로 14일을 실제 날짜 기준으로 펼치고, 완료된 스왑은 해당 날짜에만 반영한다.
-            const today = new Date();
+            const todayStr = localDateStr();
+            let latestEnd = todayStr;
+            list.forEach(x => { if ((x.endDate || todayStr) > latestEnd) latestEnd = x.endDate || todayStr; });
             const datedGroups = {};
-            for (let i=0; i<14; i++) {
-                const d = new Date(today); d.setDate(today.getDate()+i);
-                const dateStr = d.toISOString().slice(0,10);
+            for (let dateStr = todayStr, guard=0; dateStr <= latestEnd && guard < 740; dateStr = kstDateAdd(dateStr,1), guard++) {
+                if (isDutyPausedOn(dateStr)) continue;
                 const day = dayNameFromDate(dateStr);
                 if (day==='토요일' || day==='일요일') continue;
-                list.filter(x=>x.day===day).forEach(base=>{
-                    let actualName = base.memberName;
+                list.filter(x => x.day===day && (!x.startDate || x.startDate<=dateStr) && (!x.endDate || dateStr<=x.endDate)).forEach(base=>{
+                    let actualName = canonicalMemberName(base.memberName);
                     const swaps=(dbCache.swaps[dbCache.currentOrgCode]||[]).filter(sw=>sw.status==='완료'&&sw.date===dateStr);
                     swaps.forEach(sw=>{
-                        if (base.memberName===sw.user) actualName=sw.acceptedBy;
-                        else if (base.memberName===sw.acceptedBy) actualName=sw.user;
+                        if (actualName===canonicalMemberName(sw.user)) actualName=canonicalMemberName(sw.acceptedBy);
+                        else if (actualName===canonicalMemberName(sw.acceptedBy)) actualName=canonicalMemberName(sw.user);
                     });
                     const k=`${dateStr}|${day}|${base.dutyType}`;
                     (datedGroups[k] ||= []).push({...base, memberName:actualName});
                 });
             }
-            container.innerHTML = Object.entries(datedGroups).map(([k,arr])=>{
+            const entries = Object.entries(datedGroups);
+            if (!entries.length) { container.innerHTML='<p class="text-center text-xs text-slate-400 py-6">현재 표시할 지도 일정이 없습니다.</p>'; return; }
+            container.innerHTML = entries.map(([k,arr])=>{
                 const [date,day,type]=k.split('|');
                 const unique=[]; arr.forEach(x=>{if(!unique.some(u=>u.memberName===x.memberName&&u.time===x.time))unique.push(x)});
                 return `<div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm text-xs space-y-2">
                     <div class="flex flex-wrap gap-1.5"><span class="px-2 py-1 bg-slate-100 text-slate-700 font-bold rounded-lg">${date}</span><span class="px-2 py-1 bg-indigo-50 text-indigo-600 font-bold rounded-lg">${day}</span><span class="px-2 py-1 bg-amber-50 text-amber-700 font-bold rounded-lg">${type}</span></div>
                     <div class="text-[11px] text-slate-500">같은 날 · 같은 지도 유형 담당자</div>
-                    <div class="flex flex-wrap gap-2">${unique.map(x=>`<span class="bg-slate-50 border px-2 py-1 rounded-lg inline-flex items-center gap-1.5"><b>${x.memberName}</b> · ${x.time}${currentUserIsAdmin()?`<button onclick="deleteDutySchedule(${x.id})" class="ml-1 text-rose-600 font-bold" title="이 선도 일정 삭제">삭제</button>`:''}</span>`).join('')}</div>
+                    <div class="flex flex-wrap gap-2">${unique.map(x=>`<span class="bg-slate-50 border px-2 py-1 rounded-lg inline-flex items-center gap-1.5"><b>${x.memberName}</b> · ${x.time}${x.endDate?` · ~${x.endDate}`:''}${currentUserIsAdmin()?`<button onclick="deleteDutySchedule(${x.id})" class="ml-1 text-rose-600 font-bold" title="이 선도 일정 삭제">삭제</button>`:''}</span>`).join('')}</div>
                 </div>`;
             }).join('');
         }
@@ -1889,21 +1953,31 @@
             if (!confirm(`${target.day} ${target.dutyType} · ${target.memberName} 일정을 삭제할까요?`)) return;
             dbCache.duties[dbCache.currentOrgCode] = list.filter(d => Number(d.id) !== Number(id));
             await syncSubColToFirestore('duties', dbCache.currentOrgCode, dbCache.duties[dbCache.currentOrgCode]);
-            renderDutyScheduleList();
+            renderDutyScheduleList(); updateHomeDashboardData();
             showAlert('선도 일정이 삭제되었습니다.');
         }
 
+        function kstParts(d=new Date()){
+            const parts = new Intl.DateTimeFormat('en-CA', {
+                timeZone:'Asia/Seoul', year:'numeric', month:'2-digit', day:'2-digit',
+                hour:'2-digit', minute:'2-digit', second:'2-digit', hourCycle:'h23'
+            }).formatToParts(d);
+            const o={}; parts.forEach(p=>{ if(p.type!=='literal') o[p.type]=p.value; });
+            return o;
+        }
         function localDateStr(d=new Date()) {
-            const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
-            return `${y}-${m}-${day}`;
+            const p=kstParts(d); return `${p.year}-${p.month}-${p.day}`;
+        }
+        function kstDateAdd(dateStr, days){
+            const ms = Date.parse(`${dateStr}T12:00:00+09:00`) + days*86400000;
+            return localDateStr(new Date(ms));
         }
         function dutyDateTime(dateStr,timeStr){
-            const [y,m,d]=dateStr.split('-').map(Number), [hh,mm]=timeStr.split(':').map(Number);
-            return new Date(y,m-1,d,hh,mm,0,0);
+            return new Date(Date.parse(`${dateStr}T${timeStr}:00+09:00`));
         }
         function attendancePhase(dateStr,timeStr,now=new Date()){
             const scheduled=dutyDateTime(dateStr,timeStr);
-            const diff=(now-scheduled)/60000;
+            const diff=(now.getTime()-scheduled.getTime())/60000;
             if(diff < -5) return {phase:'early',diff,scheduled};
             if(diff <= 1) return {phase:'present',diff,scheduled};
             if(diff <= 40) return {phase:'late',diff,scheduled};
@@ -2037,11 +2111,14 @@
         }
 
         function getEffectiveDutyForDate(name,dateStr){
+            if (isDutyPausedOn(dateStr)) return [];
             const targetName=canonicalMemberName(name);
             const day=dayNameFromDate(dateStr);
-            const raw=(dbCache.duties[dbCache.currentOrgCode]||[]).filter(d=>d.day===day);
-            // 예전 버전에서 "이름 (역할)" 형태로 저장된 일정도 실제 회원 이름으로 복구하고,
-            // 같은 사람·같은 요일·같은 지도유형 중복은 가장 최근 한 건만 사용한다.
+            const raw=(dbCache.duties[dbCache.currentOrgCode]||[]).filter(d=>
+                d.kind!=='pause' && d.day===day &&
+                (!d.startDate || d.startDate<=dateStr) &&
+                (!d.endDate || dateStr<=d.endDate)
+            );
             const seen=new Set(), base=[];
             raw.forEach(d=>{
                 const memberName=canonicalMemberName(d.memberName);
@@ -2070,9 +2147,12 @@
             document.getElementById('dash-crack').innerText=`${myAtt}회`; document.getElementById('dash-meeting').innerText=`${myMeets}회`; document.getElementById('dash-time').innerText=`${myAtt}시간`;
             const latest=meets[0]; document.getElementById('home-meeting-preview').innerHTML=latest?`<b>${latest.title}</b> (${latest.loc} / ${latest.time.replace('T',' ')})${latest.details?`<div class="mt-1 text-slate-500 whitespace-pre-line">${latest.details}</div>`:''}`:'추가 일정 없음';
             const np=document.getElementById('home-notice-preview'); if(np) np.innerHTML=notices.length?notices.slice(0,5).map(n=>`<div class="border-t pt-2"><b>${n.title}</b><p class="text-slate-500 whitespace-pre-line">${n.content}</p><span class="text-[10px] text-slate-400">${n.date||''}</span></div>`).join(''):'등록된 공지가 없습니다.';
-            const today=new Date(), rows=[]; for(let i=0;i<14;i++){const d=new Date(today);d.setDate(today.getDate()+i);const ds=localDateStr(d);const eff=getEffectiveDutyForDate(dbCache.currentUser.name,ds);eff.forEach(x=>rows.push({...x,date:ds}));}
-            const dp=document.getElementById('home-duty-preview'); if(dp) dp.innerHTML=rows.length?rows.slice(0,8).map(d=>`<div class="border-t pt-2"><b>${d.date} · ${d.dutyType}</b> (${d.time})${d.originalMemberName!==d.effectiveMemberName?` <span class="text-indigo-600 font-bold">· 스왑 반영</span>`:''}</div>`).join(''):'앞으로 2주간 배정된 지도 일정이 없습니다.';
+            const rows=[], dutyRows=(dbCache.duties[dbCache.currentOrgCode]||[]).filter(x=>x.kind!=='pause');
+            let latestDutyEnd=localDateStr(); dutyRows.forEach(x=>{if((x.endDate||latestDutyEnd)>latestDutyEnd)latestDutyEnd=x.endDate||latestDutyEnd;});
+            for(let ds=localDateStr(),guard=0;ds<=latestDutyEnd&&guard<740;ds=kstDateAdd(ds,1),guard++){const eff=getEffectiveDutyForDate(dbCache.currentUser.name,ds);eff.forEach(x=>rows.push({...x,date:ds}));}
+            const dp=document.getElementById('home-duty-preview'); if(dp) dp.innerHTML=rows.length?rows.slice(0,8).map(d=>`<div class="border-t pt-2"><b>${d.date} · ${d.dutyType}</b> (${d.time})${d.originalMemberName!==d.effectiveMemberName?` <span class="text-indigo-600 font-bold">· 스왑 반영</span>`:''}</div>`).join(''):(getDutyPause()?`<span class="text-amber-600 font-bold">현재 ${getDutyPause().endDate}까지 지도 중지 중입니다.</span>`:'배정된 지도 일정이 없습니다.');
             renderHomeAttendanceAlerts();
+            checkGuideReminder();
         }
         function openGuideAttendanceModal(){
             const today=localDateStr();
@@ -2221,6 +2301,47 @@
             showAlert(`${targetName} 님의 직책이 '${newRole}'(으)로 변경되었습니다.`);
         }
 
+
+        function reminderStorageKey(){
+            return `sc_guide_reminder_${dbCache.currentUser?.id || dbCache.currentUser?.name || 'user'}`;
+        }
+        function getGuideReminderSettings(){
+            try { return JSON.parse(safeStorage.getItem(reminderStorageKey()) || '{"enabled":false,"time":"20:00","lastKey":""}'); }
+            catch(e){ return {enabled:false,time:'20:00',lastKey:''}; }
+        }
+        function loadGuideReminderSettings(){
+            const s=getGuideReminderSettings(), en=document.getElementById('guide-reminder-enabled'), tm=document.getElementById('guide-reminder-time');
+            if(en) en.checked=!!s.enabled; if(tm) tm.value=s.time||'20:00';
+        }
+        async function saveGuideReminderSettings(){
+            const en=document.getElementById('guide-reminder-enabled'), tm=document.getElementById('guide-reminder-time');
+            const old=getGuideReminderSettings(), next={...old,enabled:!!en?.checked,time:tm?.value||'20:00'};
+            safeStorage.setItem(reminderStorageKey(),JSON.stringify(next));
+            if(next.enabled) await requestGuideNotificationPermission(false);
+            showAlert(next.enabled?`지도 전날 알림을 ${next.time}로 켰습니다.`:'지도 전날 알림을 껐습니다.');
+        }
+        async function requestGuideNotificationPermission(showMessage=true){
+            if(!('Notification' in window)){ if(showMessage) showAlert('이 브라우저는 알림 기능을 지원하지 않습니다.'); return false; }
+            let p=Notification.permission;
+            if(p==='default') p=await Notification.requestPermission();
+            if(showMessage) showAlert(p==='granted'?'알림 권한이 허용되었습니다.':'알림 권한이 허용되지 않았습니다.');
+            return p==='granted';
+        }
+        async function checkGuideReminder(){
+            if(!dbCache.currentUser || !dbCache.currentOrgCode) return;
+            const s=getGuideReminderSettings(); if(!s.enabled) return;
+            const p=kstParts(), nowMin=Number(p.hour)*60+Number(p.minute), [hh,mm]=(s.time||'20:00').split(':').map(Number);
+            if(nowMin < hh*60+mm) return;
+            const today=`${p.year}-${p.month}-${p.day}`, tomorrow=kstDateAdd(today,1);
+            const assignments=getEffectiveDutyForDate(dbCache.currentUser.name,tomorrow);
+            if(!assignments.length) return;
+            const key=`${today}|${s.time}`;
+            if(s.lastKey===key) return;
+            const body=`내일 지도: ${assignments.map(x=>`${x.dutyType} ${x.time}`).join(', ')}`;
+            if(await requestGuideNotificationPermission(false)) new Notification('학생회 지도 알림',{body,silent:false});
+            s.lastKey=key; safeStorage.setItem(reminderStorageKey(),JSON.stringify(s));
+        }
+        setInterval(checkGuideReminder, 60000);
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
