@@ -1,4 +1,4 @@
-const CACHE_NAME = 'student-council-v2-20260930';
+const CACHE_NAME = 'student-council-v4-20260930';
 const CORE = ['./', './manifest.webmanifest'];
 
 self.addEventListener('install', event => {
@@ -7,6 +7,7 @@ self.addEventListener('install', event => {
       .then(c => c.addAll(CORE))
       .catch(() => {})
   );
+
   self.skipWaiting();
 });
 
@@ -36,6 +37,7 @@ self.addEventListener('fetch', event => {
         );
 
         const cache = await caches.open(CACHE_NAME);
+
         cache.put('./', fresh.clone());
 
         return fresh;
@@ -53,7 +55,10 @@ self.addEventListener('fetch', event => {
 
   event.respondWith(
     caches.match(event.request)
-      .then(cached => cached || fetch(event.request))
+      .then(
+        cached =>
+          cached || fetch(event.request)
+      )
   );
 });
 
@@ -75,7 +80,10 @@ self.addEventListener('push', event => {
       data.title || '학생회 알림',
       {
         body: data.body || '',
-        tag: data.tag || 'student-council',
+
+        tag:
+          data.tag ||
+          'student-council',
 
         data: {
           url: data.url || './'
