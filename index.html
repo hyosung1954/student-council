@@ -215,18 +215,19 @@
         <div id="main-app" class="flex-1 flex flex-col h-full overflow-hidden hidden">
             <!-- Header with Visible Organization Code -->
             <header class="bg-indigo-600 text-white px-4 py-3 flex justify-between items-center shadow-md z-10">
-                <div class="flex items-center space-x-2.5">
+                <div class="flex items-center space-x-2.5 min-w-0">
                     <div id="header-org-avatar" class="w-9 h-9 rounded-xl bg-white/20 overflow-hidden flex items-center justify-center border border-white/30 shadow-inner flex-shrink-0">
                         <i class="fa-solid fa-school text-white text-sm"></i>
                     </div>
-                    <div>
-                        <h1 id="header-org-name" class="font-bold text-xs tracking-tight leading-snug">학생회 조직</h1>
+                    <div class="min-w-0">
+                        <h1 id="header-org-name" class="font-bold text-xs tracking-tight leading-snug truncate">학생회 조직</h1>
                         <p class="text-[10px] text-indigo-200 leading-none mt-0.5">조직코드: <span id="header-org-code-display" class="font-bold text-yellow-300"></span></p>
                     </div>
                 </div>
-                <div class="flex items-center space-x-2">
-                    <span id="header-user-badge" class="text-[10px] bg-indigo-700 px-2 py-1 rounded-lg font-bold">회원</span>
-                    <button onclick="logoutToAuth()" class="bg-indigo-500/80 hover:bg-indigo-700 text-white text-[10px] px-2.5 py-1.5 rounded-xl font-bold transition">로그아웃</button>
+                <div class="flex items-center gap-1.5 flex-shrink-0">
+                    <span id="header-user-badge" class="text-[11px] font-bold max-w-[92px] truncate">이름</span>
+                    <button onclick="logoutToAuth()" class="bg-indigo-500/80 hover:bg-indigo-700 text-white text-[10px] px-2 py-1.5 rounded-xl font-bold transition">로그아웃</button>
+                    <button onclick="switchTab('settings')" class="bg-white/15 hover:bg-white/25 text-white text-[10px] px-2 py-1.5 rounded-xl font-bold transition"><i class="fa-solid fa-gear mr-1"></i>설정</button>
                 </div>
             </header>
 
@@ -237,13 +238,23 @@
             </main>
 
             <!-- Bottom Navigation Bar -->
-            <nav id="nav-bar" class="absolute bottom-0 left-0 right-0 bg-white border-t border-slate-200 py-2 px-1 flex justify-around items-center z-20 shadow-lg">
-                <button onclick="switchTab('home')" class="tab-btn flex flex-col items-center text-indigo-600 font-bold transition" data-tab="home"><i class="fa-solid fa-house text-base mb-0.5"></i><span class="text-[10px]">홈</span></button>
-                <button onclick="switchTab('discipline')" class="tab-btn flex flex-col items-center text-slate-400 hover:text-indigo-600 transition" data-tab="discipline"><i class="fa-solid fa-shield-halved text-base mb-0.5"></i><span class="text-[10px]">선도</span></button>
-                <button onclick="switchTab('meetings')" class="tab-btn flex flex-col items-center text-slate-400 hover:text-indigo-600 transition" data-tab="meetings"><i class="fa-solid fa-calendar-days text-base mb-0.5"></i><span class="text-[10px]">회의소집</span></button>
-                <button onclick="switchTab('announcements')" class="tab-btn flex flex-col items-center text-slate-400 hover:text-indigo-600 transition" data-tab="announcements"><i class="fa-solid fa-bullhorn text-base mb-0.5"></i><span class="text-[10px]">공지</span></button>
-                <button onclick="switchTab('departments')" class="tab-btn flex flex-col items-center text-slate-400 hover:text-indigo-600 transition" data-tab="departments"><i class="fa-solid fa-people-group text-base mb-0.5"></i><span class="text-[10px]">부서</span></button>
-                <button onclick="switchTab('settings')" class="tab-btn flex flex-col items-center text-slate-400 hover:text-indigo-600 transition" data-tab="settings"><i class="fa-solid fa-gear text-base mb-0.5"></i><span class="text-[10px]">설정</span></button>
+            <nav id="nav-bar" class="absolute bottom-0 left-0 right-0 bg-white border-t border-slate-200 py-2 px-2 flex justify-around items-end z-20 shadow-lg">
+                <button onclick="switchTab('announcements')" class="tab-btn flex flex-col items-center text-slate-400 hover:text-indigo-600 transition min-w-[52px]" data-tab="announcements">
+                    <i class="fa-solid fa-bullhorn text-lg mb-0.5"></i><span class="text-[10px]">공지</span>
+                </button>
+                <button onclick="switchTab('discipline')" class="tab-btn flex flex-col items-center text-slate-400 hover:text-indigo-600 transition min-w-[52px]" data-tab="discipline">
+                    <i class="fa-solid fa-shield-halved text-lg mb-0.5"></i><span class="text-[10px]">선도</span>
+                </button>
+                <button onclick="switchTab('home')" class="tab-btn flex flex-col items-center text-indigo-600 font-bold transition -mt-5 min-w-[70px]" data-tab="home">
+                    <span class="w-14 h-14 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-lg border-4 border-white"><i class="fa-solid fa-house text-xl"></i></span>
+                    <span class="text-[11px] mt-0.5 font-extrabold">홈</span>
+                </button>
+                <button onclick="switchTab('meetings')" class="tab-btn flex flex-col items-center text-slate-400 hover:text-indigo-600 transition min-w-[52px]" data-tab="meetings">
+                    <i class="fa-solid fa-calendar-days text-lg mb-0.5"></i><span class="text-[10px]">회의소집</span>
+                </button>
+                <button onclick="switchTab('departments')" class="tab-btn flex flex-col items-center text-slate-400 hover:text-indigo-600 transition min-w-[52px]" data-tab="departments">
+                    <i class="fa-solid fa-people-group text-lg mb-0.5"></i><span class="text-[10px]">부서</span>
+                </button>
             </nav>
         </div>
 
@@ -739,6 +750,7 @@
                     imageUrl: o.image_url || '',
                     reasons: o.reasons || [],
                     departments: Array.isArray(o.departments) && o.departments.length ? o.departments : defaultDepartments(),
+                    dashboardResetAt: o.dashboard_reset_at || null,
                     members: o.members || []
                 }));
 
@@ -829,6 +841,7 @@
                     image_url: org.imageUrl || '',
                     reasons: org.reasons || [],
                     departments: getDepartments(org),
+                    dashboard_reset_at: org.dashboardResetAt || null,
                     members: org.members || []
                 }, { onConflict: 'code' });
 
@@ -1071,6 +1084,7 @@
                 imageUrl: '',
                 reasons: defaultReasons,
                 departments: defaultDepartments(),
+                dashboardResetAt: null,
                 members: [{ name: dbCache.currentUser.name, role: '단장', grade:dbCache.currentUser.grade||'', class:dbCache.currentUser.class||'', number:dbCache.currentUser.number||'' }]
             };
 
@@ -1142,7 +1156,7 @@
 
             document.getElementById('header-org-name').innerText = org ? org.name : '학생회 조직';
             document.getElementById('header-org-code-display').innerText = org ? org.code : '';
-            document.getElementById('header-user-badge').innerText = `${dbCache.currentUser.name} (${role})`;
+            document.getElementById('header-user-badge').innerText = dbCache.currentUser.name;
 
             const avatarContainer = document.getElementById('header-org-avatar');
             if (org && org.imageUrl) {
@@ -1210,7 +1224,7 @@
             const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
             const member = org ? org.members.find(m => m.name === dbCache.currentUser.name) : null;
             const role = member ? member.role : '회원';
-            const isAdmin = (role === '단장' || role === '전교회장' || role === '부단장' || role === '전교부회장');
+            const isAdmin = (role === '단장' || role === '전교회장');
 
             if (tab === 'home') {
                 container.innerHTML = `
@@ -1253,6 +1267,7 @@
                                     <span id="dash-time" class="text-sm font-bold text-amber-600">0시간</span>
                                 </div>
                             </div>
+                            ${currentUserIsAdmin()?`<button onclick="resetActivityDashboard()" class="w-full py-2 bg-rose-50 text-rose-600 rounded-xl font-bold text-[11px] border border-rose-100">활동 대시보드 초기화</button>`:''}
                         </div>
                     </div>
                 `;
@@ -1427,7 +1442,7 @@
                             <button onclick="resetMemberPassword()" class="w-full py-2.5 bg-amber-600 text-white rounded-xl font-bold">123456으로 초기화</button>
                         </div>
                         <div class="bg-rose-50 p-4 rounded-2xl border border-rose-100 shadow-sm space-y-2">
-                            <h3 class="font-bold text-rose-600"><i class="fa-solid fa-shield-dog mr-1"></i> 조직 관리 및 설정 (리더진 전용)</h3>
+                            <h3 class="font-bold text-rose-600"><i class="fa-solid fa-shield-dog mr-1"></i> 조직 관리 및 설정 (관리자 전용)</h3>
                             <p class="text-slate-600">조직 대표 이미지, 선도 위반 사유(추가/수정/삭제) 및 조직원 역할을 관리합니다.</p>
                             <button onclick="openAdminModal()" class="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold transition shadow-sm">조직 관리 패널 열기</button>
                         </div>` : ''}
@@ -1658,7 +1673,7 @@
             const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
             const member = org ? org.members.find(m => m.name === dbCache.currentUser.name) : null;
             const role = member ? member.role : '회원';
-            const isAdmin = (role === '단장' || role === '전교회장' || role === '부단장' || role === '전교부회장');
+            const isAdmin = (role === '단장' || role === '전교회장');
 
             if (recordsSubTab === 'dates') {
                 if (list.length === 0) {
@@ -1785,7 +1800,7 @@
             const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
             const member = org ? org.members.find(m => m.name === dbCache.currentUser.name) : null;
             const role = member ? member.role : '회원';
-            const isAdmin = (role === '단장' || role === '전교회장' || role === '부단장' || role === '전교부회장');
+            const isAdmin = (role === '단장' || role === '전교회장');
 
             if (!isAdmin) {
                 showAlert('관리자만 일괄 삭제할 수 있습니다.');
@@ -1801,7 +1816,7 @@
             const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
             const member = org ? org.members.find(m => m.name === dbCache.currentUser.name) : null;
             const role = member ? member.role : '회원';
-            const isAdmin = (role === '단장' || role === '전교회장' || role === '부단장' || role === '전교부회장');
+            const isAdmin = (role === '단장' || role === '전교회장');
 
             if (!isAdmin) {
                 showAlert('관리자만 일괄 삭제할 수 있습니다.');
@@ -1843,7 +1858,7 @@
             const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
             const member = org ? org.members.find(m => m.name === dbCache.currentUser.name) : null;
             const role = member ? member.role : '회원';
-            const isAdmin = (role === '단장' || role === '전교회장' || role === '부단장' || role === '전교부회장');
+            const isAdmin = (role === '단장' || role === '전교회장');
 
             const sample = studentRecords[0];
             const studentTitle = `${sample.grade} ${sample.classVal} ${sample.number} ${sample.name}`;
@@ -2196,11 +2211,11 @@
         function currentOrg(){return dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);}
         function currentMember(){return currentOrg()?.members?.find(m=>m.name===dbCache.currentUser?.name)||null;}
         function departmentById(id){return getDepartments().find(d=>d.id===id)||null;}
-        function isGlobalAdminMember(m){return ['단장','전교회장','부단장','전교부회장'].includes(m?.role);}
-        function departmentMembers(id){return (currentOrg()?.members||[]).filter(m=>m.departmentId===id&&!isGlobalAdminMember(m));}
+        function isGlobalAdminMember(m){return ['단장','전교회장'].includes(m?.role);}
+        function departmentMembers(id){return (currentOrg()?.members||[]).filter(m=>m.departmentId===id);}
         function departmentLeaders(){const org=currentOrg();if(!org)return[];const seen=new Set(),out=[];(org.members||[]).forEach(m=>{if(m.departmentRole==='부장'||isGlobalAdminMember(m)){if(!seen.has(m.name)){seen.add(m.name);out.push(m);}}});return out;}
         function departmentAudience(key){return key==='leaders'?departmentLeaders():departmentMembers(key);}
-        function canPostDepartment(key){const m=currentMember();if(!m)return false;if(key==='leaders')return m.departmentRole==='부장'||isGlobalAdminMember(m);return !isGlobalAdminMember(m)&&m.departmentId===key&&m.departmentRole==='부장';}
+        function canPostDepartment(key){const m=currentMember();if(!m)return false;if(key==='leaders')return m.departmentRole==='부장'||isGlobalAdminMember(m);return m.departmentId===key&&m.departmentRole==='부장';}
         function canManageDepartmentContent(key){return currentUserIsAdmin()||canPostDepartment(key);}
         let activeDepartmentKey=null;
         let meetingComposerContext=null;
@@ -2220,8 +2235,8 @@
                 <div><h2 class="text-base font-bold text-slate-800">부서</h2><p class="text-[11px] text-slate-500">같은 부서 구성원끼리 회의 소집과 공지를 공유합니다.</p></div>
                 <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1">${keys.map(k=>`<button onclick="activeDepartmentKey=${JSON.stringify(k)};renderDepartmentHub()" class="whitespace-nowrap px-3 py-2 rounded-xl text-xs font-bold ${k===key?'bg-indigo-600 text-white':'bg-white border text-slate-600'}">${departmentDisplayName(k)}</button>`).join('')}</div>
                 <div class="bg-gradient-to-r from-indigo-500 to-violet-600 text-white rounded-2xl p-4">
-                    <div class="flex justify-between items-start gap-2"><div><div class="font-bold text-base">${departmentDisplayName(key)}</div><div class="text-[11px] text-indigo-100 mt-1">${members.map(m=>`${m.name}${m.departmentRole?`(${m.departmentRole})`:isGlobalAdminMember(m)?`(${m.role})`:''}`).join(' · ')||'구성원 없음'}</div></div>${canPost?`<div class="flex gap-1"><button onclick="openDepartmentNotice(${JSON.stringify(key)})" class="px-2.5 py-1.5 bg-white/20 rounded-lg font-bold text-[11px]">공지</button><button onclick="openDepartmentMeeting(${JSON.stringify(key)})" class="px-2.5 py-1.5 bg-white/20 rounded-lg font-bold text-[11px]">회의 소집</button></div>`:''}</div>
-                    ${admin&&key!=='leaders'?`<div class="text-[10px] text-indigo-100 mt-2">관리자는 이 부서의 내용을 확인·관리할 수 있지만 부서 공지/소집 작성에는 직접 참여하지 않습니다.</div>`:''}
+                    <div class="flex justify-between items-start gap-2"><div><div class="font-bold text-base">${departmentDisplayName(key)}</div><div class="text-[11px] text-indigo-100 mt-1">${members.map(m=>`${m.name}(${key==='leaders'?(isGlobalAdminMember(m)?m.role:'부장'):`${departmentDisplayName(key)} ${m.departmentRole||'부원'}`})`).join(' · ')||'구성원 없음'}</div></div>${canPost?`<div class="flex gap-1"><button onclick="openDepartmentNotice(${JSON.stringify(key)})" class="px-2.5 py-1.5 bg-white/20 rounded-lg font-bold text-[11px]">공지</button><button onclick="openDepartmentMeeting(${JSON.stringify(key)})" class="px-2.5 py-1.5 bg-white/20 rounded-lg font-bold text-[11px]">회의 소집</button></div>`:''}</div>
+                    ${key!=='leaders'&&currentMember()?.departmentId===key&&currentMember()?.departmentRole==='부장'?`<div class="mt-3 bg-white/10 rounded-xl p-2"><div class="text-[10px] font-bold mb-1">차장 임명</div><div class="flex gap-1"><select id="deputy-select-${key}" class="flex-1 text-slate-800 bg-white rounded-lg px-2 py-1.5 text-[11px]"><option value="">차장 없음</option>${members.filter(x=>x.name!==currentMember().name).map(x=>`<option value="${x.name}" ${x.departmentRole==='차장'?'selected':''}>${x.name}</option>`).join('')}</select><button onclick="appointDeputy(${JSON.stringify(key)})" class="px-2.5 py-1.5 bg-white text-indigo-700 rounded-lg text-[11px] font-bold">저장</button></div></div>`:''}
                 </div>
                 <div class="space-y-2"><h3 class="font-bold text-sm text-slate-800">부서 공지</h3>${notices.length?notices.map(n=>`<div class="bg-white border rounded-2xl p-4 text-xs"><div class="flex justify-between gap-2"><b class="text-sm">${n.title}</b>${canManageDepartmentContent(key)?`<button onclick="deleteDepartmentNotice(${JSON.stringify(n.id)},${JSON.stringify(key)})" class="text-rose-600 font-bold">삭제</button>`:''}</div><p class="mt-2 whitespace-pre-line text-slate-600">${n.content}</p><div class="text-[10px] text-slate-400 mt-2">${n.date||''} · ${n.author||''}</div></div>`).join(''):'<div class="text-xs text-slate-400 bg-white border rounded-2xl p-4">등록된 부서 공지가 없습니다.</div>'}</div>
                 <div class="space-y-2"><h3 class="font-bold text-sm text-slate-800">부서 회의</h3><div id="department-meeting-list"></div></div>`;
@@ -2245,13 +2260,57 @@
         function openDepartmentAdmin(){if(!currentUserIsAdmin())return showAlert('관리자만 부서를 관리할 수 있습니다.');renderDepartmentAdmin();openModal('department-admin-modal');}
         function renderDepartmentAdmin(){
             const org=currentOrg(),root=document.getElementById('department-admin-list');if(!org||!root)return;
-            const depts=getDepartments(org),assignable=(org.members||[]).filter(m=>!isGlobalAdminMember(m));
-            root.innerHTML=`<div class="space-y-2">${depts.map(d=>`<div class="bg-slate-50 border rounded-2xl p-3"><div class="flex gap-2"><input id="dept-name-${d.id}" value="${d.name}" class="flex-1 bg-white border px-3 py-2 rounded-xl font-bold text-xs"><button onclick="renameDepartment(${JSON.stringify(d.id)})" class="px-2.5 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-xs">수정</button><button onclick="deleteDepartment(${JSON.stringify(d.id)})" class="px-2.5 bg-rose-50 text-rose-600 rounded-xl font-bold text-xs">삭제</button></div></div>`).join('')}</div><div class="border-t pt-4"><h4 class="font-bold text-sm mb-2">학생회 인원 부서 배정</h4><div class="space-y-2">${assignable.map(m=>`<div class="bg-slate-50 border rounded-2xl p-3 text-xs"><div class="font-bold mb-2">${m.name} <span class="text-slate-400">(${m.role||'회원'})</span></div><div class="grid grid-cols-2 gap-2"><select id="member-dept-${safeDomId(m.name)}" class="bg-white border rounded-xl px-2 py-2"><option value="">미배정</option>${depts.map(d=>`<option value="${d.id}" ${m.departmentId===d.id?'selected':''}>${d.name}</option>`).join('')}</select><select id="member-deptrole-${safeDomId(m.name)}" class="bg-white border rounded-xl px-2 py-2"><option value="부원" ${!m.departmentRole||m.departmentRole==='부원'?'selected':''}>부원</option><option value="차장" ${m.departmentRole==='차장'?'selected':''}>차장</option><option value="부장" ${m.departmentRole==='부장'?'selected':''}>부장</option></select></div><button onclick="saveMemberDepartment(${JSON.stringify(m.name)})" class="w-full mt-2 py-2 bg-indigo-600 text-white rounded-xl font-bold">배정 저장</button></div>`).join('')||'<p class="text-slate-400">배정할 일반 구성원이 없습니다.</p>'}</div></div>`;
+            const depts=getDepartments(org),assignable=(org.members||[]);
+            root.innerHTML=`
+                <div class="space-y-2">
+                    ${depts.map(d=>`<div class="bg-slate-50 border rounded-2xl p-3"><div class="flex gap-2"><input id="dept-name-${d.id}" value="${d.name}" class="flex-1 bg-white border px-3 py-2 rounded-xl font-bold text-xs"><button onclick="renameDepartment(${JSON.stringify(d.id)})" class="px-2.5 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-xs">수정</button><button onclick="deleteDepartment(${JSON.stringify(d.id)})" class="px-2.5 bg-rose-50 text-rose-600 rounded-xl font-bold text-xs">삭제</button></div></div>`).join('')}
+                </div>
+                <div class="border-t pt-4">
+                    <h4 class="font-bold text-sm mb-1">학생회 인원 부서 배정</h4>
+                    <p class="text-[10px] text-slate-500 mb-2">관리자는 모든 조직원을 부서에 배치하고 부장을 임명할 수 있습니다. 차장 임명은 해당 부서의 부장만 할 수 있습니다.</p>
+                    <div class="space-y-2">
+                        ${assignable.map(m=>`<div class="bg-slate-50 border rounded-2xl p-3 text-xs"><div class="font-bold mb-2">${m.name} <span class="text-slate-400">(${m.role||'회원'})</span>${m.departmentId?` <span class="text-indigo-600">· ${departmentById(m.departmentId)?.name||'부서'} ${m.departmentRole||'부원'}</span>`:''}</div><div class="grid grid-cols-2 gap-2"><select id="member-dept-${safeDomId(m.name)}" class="bg-white border rounded-xl px-2 py-2"><option value="">미배정</option>${depts.map(d=>`<option value="${d.id}" ${m.departmentId===d.id?'selected':''}>${d.name}</option>`).join('')}</select><select id="member-head-${safeDomId(m.name)}" class="bg-white border rounded-xl px-2 py-2"><option value="부원" ${m.departmentRole!=='부장'?'selected':''}>부원${m.departmentRole==='차장'?' (현재 차장)':''}</option><option value="부장" ${m.departmentRole==='부장'?'selected':''}>부장</option></select></div><button onclick="saveMemberDepartment(${JSON.stringify(m.name)})" class="w-full mt-2 py-2 bg-indigo-600 text-white rounded-xl font-bold">배정 저장</button></div>`).join('')||'<p class="text-slate-400">조직원이 없습니다.</p>'}
+                    </div>
+                </div>`;
         }
         async function addDepartment(){const input=document.getElementById('new-department-name'),name=input?.value.trim();if(!name)return showAlert('부서 이름을 입력해주세요.');const org=currentOrg();if(!org)return;if(getDepartments(org).some(d=>d.name===name))return showAlert('같은 이름의 부서가 이미 있습니다.');org.departments.push({id:`dept-${Date.now()}`,name});await syncOrgToFirestore(org);input.value='';renderDepartmentAdmin();showAlert('부서를 추가했습니다.');}
         async function renameDepartment(id){const org=currentOrg(),d=getDepartments(org).find(x=>x.id===id),input=document.getElementById(`dept-name-${id}`);if(!d||!input)return;const name=input.value.trim();if(!name)return showAlert('부서 이름을 입력해주세요.');d.name=name;await syncOrgToFirestore(org);renderDepartmentAdmin();showAlert('부서 이름을 수정했습니다.');}
         async function deleteDepartment(id){const org=currentOrg(),d=getDepartments(org).find(x=>x.id===id);if(!d)return;if(!confirm(`${d.name}을(를) 삭제할까요? 해당 부서원은 미배정 상태가 됩니다.`))return;org.departments=org.departments.filter(x=>x.id!==id);(org.members||[]).forEach(m=>{if(m.departmentId===id){delete m.departmentId;delete m.departmentRole;}});await syncOrgToFirestore(org);renderDepartmentAdmin();showAlert('부서를 삭제했습니다.');}
-        async function saveMemberDepartment(name){const org=currentOrg(),m=org?.members?.find(x=>x.name===name);if(!org||!m)return;const did=document.getElementById(`member-dept-${safeDomId(name)}`)?.value||'',role=document.getElementById(`member-deptrole-${safeDomId(name)}`)?.value||'부원';if(!did){delete m.departmentId;delete m.departmentRole;await syncOrgToFirestore(org);renderDepartmentAdmin();return showAlert('부서 미배정으로 저장했습니다.');}if(role==='부장'||role==='차장'){const exists=(org.members||[]).find(x=>x.name!==name&&x.departmentId===did&&x.departmentRole===role);if(exists)return showAlert(`${departmentById(did)?.name||'이 부서'}의 ${role}은 이미 ${exists.name} 님입니다.`);}m.departmentId=did;m.departmentRole=role;await syncOrgToFirestore(org);renderDepartmentAdmin();showAlert(`${name} 님의 부서 배정을 저장했습니다.`);}
+        async function saveMemberDepartment(name){
+            if(!currentUserIsAdmin())return showAlert('부서 배치와 부장 임명은 관리자만 가능합니다.');
+            const org=currentOrg(),m=org?.members?.find(x=>x.name===name);if(!org||!m)return;
+            const did=document.getElementById(`member-dept-${safeDomId(name)}`)?.value||'';
+            const requested=document.getElementById(`member-head-${safeDomId(name)}`)?.value||'부원';
+            if(!did){
+                delete m.departmentId;delete m.departmentRole;
+                await syncOrgToFirestore(org);renderDepartmentAdmin();return showAlert('부서 미배정으로 저장했습니다.');
+            }
+            if(requested==='부장'){
+                const exists=(org.members||[]).find(x=>x.name!==name&&x.departmentId===did&&x.departmentRole==='부장');
+                if(exists)return showAlert(`${departmentById(did)?.name||'이 부서'}의 부장은 이미 ${exists.name} 님입니다.`);
+            }
+            const moved=m.departmentId&&m.departmentId!==did;
+            m.departmentId=did;
+            if(requested==='부장')m.departmentRole='부장';
+            else if(moved||m.departmentRole!=='차장')m.departmentRole='부원';
+            await syncOrgToFirestore(org);renderDepartmentAdmin();
+            showAlert(`${name} 님의 부서 배정을 저장했습니다.`);
+        }
+
+        async function appointDeputy(departmentId){
+            const me=currentMember(),org=currentOrg();if(!org||!me)return;
+            if(me.departmentId!==departmentId||me.departmentRole!=='부장')return showAlert('해당 부서의 부장만 차장을 임명할 수 있습니다.');
+            const select=document.getElementById(`deputy-select-${departmentId}`),name=select?.value||'';
+            (org.members||[]).forEach(m=>{if(m.departmentId===departmentId&&m.departmentRole==='차장')m.departmentRole='부원';});
+            if(name){
+                const target=(org.members||[]).find(m=>m.name===name&&m.departmentId===departmentId);
+                if(!target)return showAlert('같은 부서의 인원만 차장으로 임명할 수 있습니다.');
+                if(target.departmentRole==='부장')return showAlert('부장은 차장으로 지정할 수 없습니다.');
+                target.departmentRole='차장';
+            }
+            await syncOrgToFirestore(org);renderDepartmentHub();
+            showAlert(name?`${name} 님을 차장으로 임명했습니다.`:'차장 지정을 해제했습니다.');
+        }
 
         let editingMeetingId=null;
         function renderMeetingTargetMembers(selected=null,allowedNames=null,lockAll=false){const el=document.getElementById('meeting-target-members'),org=currentOrg();if(!el||!org)return;const allowed=allowedNames?new Set(allowedNames):null,members=(org.members||[]).filter(m=>!allowed||allowed.has(m.name)),set=new Set(selected||members.map(m=>m.name));el.innerHTML=members.map(m=>`<label class="flex items-center gap-2 p-1.5"><input class="meeting-target-check" type="checkbox" value="${m.name}" ${set.has(m.name)?'checked':''} ${lockAll?'disabled':''}>${m.name} <span class="text-slate-400">(${m.role}${m.departmentRole?' · '+m.departmentRole:''})</span></label>`).join('');}
@@ -2284,11 +2343,23 @@
             });return effective;
         }
 
+        async function resetActivityDashboard(){
+            if(!currentUserIsAdmin())return showAlert('관리자만 활동 대시보드를 초기화할 수 있습니다.');
+            if(!confirm('모든 조직원의 활동 대시보드 집계를 0부터 다시 시작할까요?\n기존 출석·회의 기록 자체는 삭제되지 않습니다.'))return;
+            if(!confirm('마지막 확인입니다. 활동 대시보드를 정말 초기화하시겠습니까?'))return;
+            const org=currentOrg();if(!org)return;
+            org.dashboardResetAt=new Date().toISOString();
+            await syncOrgToFirestore(org);
+            updateHomeDashboardData();
+            showAlert('활동 대시보드를 초기화했습니다. 기존 기록은 보존됩니다.');
+        }
+
         function updateHomeDashboardData(){
             checkAttendanceDeadlines().then(()=>{ renderHomeAttendanceAlerts(); if(currentTab==='duties'&&currentUserIsAdmin()) renderGuideAttendanceReport(); });
             const meets=(dbCache.meetings[dbCache.currentOrgCode]||[]).filter(x=>x.scope!=='department'), att=dbCache.guideAttendance[dbCache.currentOrgCode]||[], notices=(dbCache.notices[dbCache.currentOrgCode]||[]).filter(x=>x.scope!=='department');
-            const myValidAtt=att.filter(a=>!a.deleted&&a.user===dbCache.currentUser.name&&a.status!=='결석');
-            const myAtt=myValidAtt.length, myMeets=meets.filter(m=>m.rsvps?.[dbCache.currentUser.name]==='참석').length;
+            const resetAt=currentOrg()?.dashboardResetAt?new Date(currentOrg().dashboardResetAt).getTime():0;
+            const myValidAtt=att.filter(a=>!a.deleted&&a.user===dbCache.currentUser.name&&a.status!=='결석'&&(!resetAt||new Date(a.createdAt||`${a.date}T${a.time||'00:00'}`).getTime()>=resetAt));
+            const myAtt=myValidAtt.length, myMeets=meets.filter(m=>m.rsvps?.[dbCache.currentUser.name]==='참석'&&(!resetAt||Number(m.id)>=resetAt)).length;
             document.getElementById('dash-crack').innerText=`${myAtt}회`; document.getElementById('dash-meeting').innerText=`${myMeets}회`; document.getElementById('dash-time').innerText=`${myAtt}시간`;
             const latest=meets[0]; document.getElementById('home-meeting-preview').innerHTML=latest?`<b>${latest.title}</b> (${latest.loc} / ${latest.time.replace('T',' ')})${latest.details?`<div class="mt-1 text-slate-500 whitespace-pre-line">${latest.details}</div>`:''}`:'추가 일정 없음';
             const np=document.getElementById('home-notice-preview'); if(np) np.innerHTML=notices.length?notices.slice(0,5).map(n=>`<div class="border-t pt-2"><b>${n.title}</b><p class="text-slate-500 whitespace-pre-line">${n.content}</p><span class="text-[10px] text-slate-400">${n.date||''}</span></div>`).join(''):'등록된 공지가 없습니다.';
@@ -2463,20 +2534,36 @@
         function openMemberDirectory(){
             if(!currentUserIsAdmin())return showAlert('관리자만 전체 인원 관리 창을 열 수 있습니다.');
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode),el=document.getElementById('member-directory-list');if(!org||!el)return;
-            el.innerHTML=(org.members||[]).map(m=>{const p=memberProfile(m.name),days=memberDutyDays(m.name);return`<div class="bg-slate-50 border rounded-2xl p-3 text-xs"><div class="flex gap-3 items-center"><img src="${p.profile_image||'https://placehold.co/72x72/e0e7ff/4f46e5?text=ME'}" class="w-11 h-11 rounded-full object-cover border"><div class="flex-1 min-w-0"><div class="font-bold text-sm">${m.name} <span class="text-indigo-600">(${m.role})</span></div><div class="text-slate-500 mt-1">${p.grade||'-'} · ${p.class||'-'} · ${p.number||'-'}</div><div class="mt-1"><b>부서</b> ${m.departmentId?(departmentById(m.departmentId)?.name||'삭제된 부서')+(m.departmentRole?' · '+m.departmentRole:''):'미배정'}</div><div class="mt-1"><b>지도 요일</b> ${days.length?days.join(', '):'배정 없음'}</div></div>${m.name!==dbCache.currentUser.name?`<button onclick="expelMember(${JSON.stringify(m.name)})" class="px-2.5 py-2 bg-rose-100 text-rose-600 rounded-xl font-bold">추방</button>`:''}</div></div>`}).join('')||'<p class="text-slate-400 text-center py-8">조직원이 없습니다.</p>';
+            el.innerHTML=(org.members||[]).map(m=>{const p=memberProfile(m.name),days=memberDutyDays(m.name);return`<div class="bg-slate-50 border rounded-2xl p-3 text-xs"><div class="flex gap-3 items-center"><img src="${p.profile_image||'https://placehold.co/72x72/e0e7ff/4f46e5?text=ME'}" class="w-11 h-11 rounded-full object-cover border"><div class="flex-1 min-w-0"><div class="font-bold text-sm">${m.name} <span class="text-indigo-600">(${m.role})</span></div><div class="text-slate-500 mt-1">${p.grade||'-'} · ${p.class||'-'} · ${p.number||'-'}</div><div class="mt-1"><b>지도 요일</b> ${days.length?days.join(', '):'배정 없음'}</div></div>${m.name!==dbCache.currentUser.name?`<button onclick="expelMember(${JSON.stringify(m.name)})" class="px-2.5 py-2 bg-rose-100 text-rose-600 rounded-xl font-bold">추방</button>`:''}</div></div>`}).join('')||'<p class="text-slate-400 text-center py-8">조직원이 없습니다.</p>';
             openModal('member-directory-modal');
         }
         async function expelMember(name){
             if(!currentUserIsAdmin())return showAlert('관리자만 조직원을 추방할 수 있습니다.');
             if(name===dbCache.currentUser.name)return showAlert('본인은 이 기능으로 추방할 수 없습니다.');
-            if(!confirm(`${name} 님을 학생회 조직에서 추방할까요?\n앞으로 배정된 지도 일정과 대기 중인 대타 요청도 함께 정리됩니다.`))return;
-            const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);if(!org)return;
-            org.members=(org.members||[]).filter(m=>m.name!==name);await syncOrgToFirestore(org);
-            dbCache.duties[dbCache.currentOrgCode]=(dbCache.duties[dbCache.currentOrgCode]||[]).filter(d=>d.kind==='pause'||canonicalMemberName(d.memberName)!==name);
-            await syncSubColToFirestore('duties',dbCache.currentOrgCode,dbCache.duties[dbCache.currentOrgCode]);
-            dbCache.swaps[dbCache.currentOrgCode]=(dbCache.swaps[dbCache.currentOrgCode]||[]).filter(x=>x.status!=='요청중'||(x.user!==name&&x.acceptedBy!==name));
-            await syncSubColToFirestore('swaps',dbCache.currentOrgCode,dbCache.swaps[dbCache.currentOrgCode]);
-            openMemberDirectory();showAlert(`${name} 님을 조직에서 추방했습니다.`);
+
+            const first=confirm(`${name} 님을 학생회 조직에서 추방할까요?\n지도 일정과 대기 중인 대타 요청도 함께 정리됩니다.`);
+            if(!first)return;
+            const second=confirm(`마지막 확인입니다.\n정말 ${name} 님을 조직에서 추방하시겠습니까?`);
+            if(!second)return;
+
+            const org=currentOrg();if(!org)return showAlert('조직 정보를 찾을 수 없습니다.');
+            try{
+                org.members=(org.members||[]).filter(m=>m.name!==name);
+                await syncOrgToFirestore(org);
+
+                dbCache.duties[dbCache.currentOrgCode]=(dbCache.duties[dbCache.currentOrgCode]||[]).filter(d=>d.kind==='pause'||canonicalMemberName(d.memberName)!==name);
+                await syncSubColToFirestore('duties',dbCache.currentOrgCode,dbCache.duties[dbCache.currentOrgCode]);
+
+                dbCache.swaps[dbCache.currentOrgCode]=(dbCache.swaps[dbCache.currentOrgCode]||[]).filter(x=>x.user!==name&&x.acceptedBy!==name);
+                await syncSubColToFirestore('swaps',dbCache.currentOrgCode,dbCache.swaps[dbCache.currentOrgCode]);
+
+                await loadAllFromSupabase();
+                openMemberDirectory();
+                showAlert(`${name} 님을 조직에서 추방했습니다.`);
+            }catch(e){
+                console.error('조직원 추방 실패:',e);
+                showAlert('추방 처리에 실패했습니다. 잠시 후 다시 시도해주세요.');
+            }
         }
         async function syncMyMemberMetadata(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode),m=org?.members?.find(x=>x.name===dbCache.currentUser?.name);if(!m||!dbCache.currentUser)return;
@@ -2732,7 +2819,7 @@
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
             const mem=org?.members.find(m=>m.name===dbCache.currentUser?.name);
-            return ['단장','전교회장','부단장','전교부회장'].includes(mem?.role);
+            return ['단장','전교회장'].includes(mem?.role);
         }
 
         async function changeMyPassword(){
