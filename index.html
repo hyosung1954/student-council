@@ -1413,7 +1413,7 @@
             const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
             const select = document.getElementById('duty-member-select');
             if (org && select) {
-                select.innerHTML = org.members.map(m => `<option value="${m.name} (${m.role})">${m.name} (${m.role})</option>`).join('');
+                select.innerHTML = org.members.map(m => `<option value="${m.name}">${m.name} (${m.role})</option>`).join('');
             }
             openModal('duty-modal');
         }
@@ -1814,17 +1814,36 @@
             return names[new Date(dateStr + 'T12:00:00').getDay()];
         }
 
-        function submitDutySchedule() {
+        function canonicalMemberName(value) {
+            const raw = String(value || '').trim();
+            const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
+            if (!org) return raw;
+            const exact = (org.members || []).find(m => m.name === raw);
+            if (exact) return exact.name;
+            const legacy = (org.members || []).find(m => raw === `${m.name} (${m.role})` || raw.startsWith(`${m.name} (`));
+            return legacy ? legacy.name : raw;
+        }
+
+        async function submitDutySchedule() {
             const day = document.getElementById('duty-day').value;
             const dutyType = document.getElementById('duty-type').value;
-            const memberName = document.getElementById('duty-member-select').value;
+            const memberName = canonicalMemberName(document.getElementById('duty-member-select').value);
             const time = document.getElementById('duty-time').value;
             if (!memberName || !time) return showAlert('담당 학생과 시간을 모두 선택해주세요.');
-            const duty = { id: Date.now(), day, dutyType, memberName, time };
-            if (!dbCache.duties[dbCache.currentOrgCode]) dbCache.duties[dbCache.currentOrgCode] = [];
-            dbCache.duties[dbCache.currentOrgCode].unshift(duty);
-            syncSubColToFirestore('duties', dbCache.currentOrgCode, dbCache.duties[dbCache.currentOrgCode]);
-            closeModal('duty-modal'); renderDutyScheduleList(); showAlert('선도 지도 일정이 배정되었습니다.');
+            const list = (dbCache.duties[dbCache.currentOrgCode] ||= []);
+            const same = list.filter(d => d.day === day && d.dutyType === dutyType && canonicalMemberName(d.memberName) === memberName);
+            if (same.length) {
+                const keep = same[0];
+                keep.memberName = memberName;
+                keep.time = time;
+                dbCache.duties[dbCache.currentOrgCode] = list.filter(d => d === keep || !(d.day === day && d.dutyType === dutyType && canonicalMemberName(d.memberName) === memberName));
+                await syncSubColToFirestore('duties', dbCache.currentOrgCode, dbCache.duties[dbCache.currentOrgCode]);
+                closeModal('duty-modal'); renderDutyScheduleList(); updateHomeDashboardData();
+                return showAlert('같은 요일·지도 유형의 기존 일정을 새 시간으로 변경했습니다.');
+            }
+            list.unshift({ id: Date.now(), day, dutyType, memberName, time });
+            await syncSubColToFirestore('duties', dbCache.currentOrgCode, list);
+            closeModal('duty-modal'); renderDutyScheduleList(); updateHomeDashboardData(); showAlert('선도 지도 일정이 배정되었습니다.');
         }
 
         function renderDutyScheduleList() {
@@ -2018,17 +2037,28 @@
         }
 
         function getEffectiveDutyForDate(name,dateStr){
+            const targetName=canonicalMemberName(name);
             const day=dayNameFromDate(dateStr);
-            const base=(dbCache.duties[dbCache.currentOrgCode]||[]).filter(d=>d.day===day);
+            const raw=(dbCache.duties[dbCache.currentOrgCode]||[]).filter(d=>d.day===day);
+            // 예전 버전에서 "이름 (역할)" 형태로 저장된 일정도 실제 회원 이름으로 복구하고,
+            // 같은 사람·같은 요일·같은 지도유형 중복은 가장 최근 한 건만 사용한다.
+            const seen=new Set(), base=[];
+            raw.forEach(d=>{
+                const memberName=canonicalMemberName(d.memberName);
+                const key=`${day}|${d.dutyType}|${memberName}`;
+                if(seen.has(key)) return;
+                seen.add(key); base.push({...d,memberName});
+            });
             const swaps=(dbCache.swaps[dbCache.currentOrgCode]||[]).filter(s=>s.status==='완료'&&s.date===dateStr);
             const effective=[];
             base.forEach(d=>{
                 let actual=d.memberName;
                 swaps.forEach(s=>{
-                    if(d.memberName===s.user) actual=s.acceptedBy;
-                    else if(d.memberName===s.acceptedBy) actual=s.user;
+                    const requester=canonicalMemberName(s.user), accepter=canonicalMemberName(s.acceptedBy);
+                    if(d.memberName===requester) actual=accepter;
+                    else if(d.memberName===accepter) actual=requester;
                 });
-                if(actual===name) effective.push({...d, originalMemberName:d.memberName, effectiveMemberName:actual});
+                if(canonicalMemberName(actual)===targetName) effective.push({...d, originalMemberName:d.memberName, effectiveMemberName:canonicalMemberName(actual)});
             });
             return effective;
         }
