@@ -41,11 +41,16 @@
         .modal-content {
             z-index: 999995 !important;
         }
+
+        .switch{position:relative;display:inline-block;width:46px;height:26px;flex-shrink:0}
+        .switch input{opacity:0;width:0;height:0}.switch-slider{position:absolute;cursor:pointer;inset:0;background:#cbd5e1;transition:.2s;border-radius:999px}
+        .switch-slider:before{content:"";position:absolute;height:20px;width:20px;left:3px;top:3px;background:white;transition:.2s;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+        .switch input:checked+.switch-slider{background:#4f46e5}.switch input:checked+.switch-slider:before{transform:translateX(20px)}
     </style>
-    <link rel="manifest" href="./manifest.webmanifest"> 
-    <meta name="theme-color" content="#4f46e5"> 
+    <link rel="manifest" href="./manifest.webmanifest">
+    <meta name="theme-color" content="#4f46e5">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    </head>
+</head>
 <body class="bg-slate-100 flex justify-center items-center min-h-screen m-0 p-0">
 
     <!-- Absolute Foreground Global Alert / Toast Container -->
@@ -331,6 +336,28 @@
             </div>
         </div>
 
+
+        <div id="discipline-request-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-end justify-center">
+            <div class="modal-content bg-white w-full max-w-md rounded-t-3xl p-6 relative">
+                <button onclick="closeModal('discipline-request-modal')" class="absolute top-5 right-5 w-8 h-8 rounded-full bg-slate-100"><i class="fa-solid fa-xmark"></i></button>
+                <h3 class="text-lg font-bold text-indigo-600 mb-4">선도 기록 변경 요청</h3>
+                <input id="discipline-request-record-id" type="hidden">
+                <div class="space-y-3 text-xs">
+                    <select id="discipline-request-type" onchange="toggleDisciplineRequestEditFields()" class="w-full bg-slate-50 border p-2 rounded-xl font-bold"><option value="edit">수정 요청</option><option value="delete">삭제 요청</option></select>
+                    <div id="discipline-request-edit-fields" class="space-y-2"><input id="discipline-request-reason" placeholder="변경할 위반 사유" class="w-full bg-slate-50 border p-2 rounded-xl"><textarea id="discipline-request-memo" placeholder="변경할 메모" class="w-full bg-slate-50 border p-2 rounded-xl h-16"></textarea></div>
+                    <textarea id="discipline-request-why" placeholder="수정/삭제 요청 사유" class="w-full bg-slate-50 border p-2 rounded-xl h-20"></textarea>
+                    <button onclick="submitDisciplineChangeRequest()" class="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold">관리자에게 요청</button>
+                </div>
+            </div>
+        </div>
+        <div id="duty-member-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-end justify-center">
+            <div class="modal-content bg-white w-full max-w-md rounded-t-3xl p-6 max-h-[85vh] overflow-y-auto relative">
+                <button onclick="closeModal('duty-member-modal')" class="absolute top-5 right-5 w-8 h-8 rounded-full bg-slate-100"><i class="fa-solid fa-xmark"></i></button>
+                <h3 id="duty-member-title" class="text-lg font-bold text-indigo-600 mb-4"></h3>
+                <div id="duty-member-schedule" class="space-y-2 text-xs"></div>
+            </div>
+        </div>
+
         <!-- 2. Swap Modal -->
         <div id="swap-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-end justify-center">
             <div class="modal-content bg-white w-full max-w-md rounded-t-3xl p-6 max-h-[85vh] overflow-y-auto transform transition-all relative">
@@ -340,8 +367,9 @@
                 <h3 class="text-lg font-bold text-slate-800 mb-4 pr-8">대타 맞교환(스왑) 신청</h3>
                 <div class="space-y-3 text-xs">
                     <div>
-                        <label class="block font-bold text-slate-700 mb-1">교체할 내 선도 날짜 및 일정</label>
-                        <input id="swap-date" type="date" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold">
+                        <label class="block font-bold text-slate-700 mb-1">교체할 내 배정 지도</label>
+                        <select id="swap-assignment" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold"></select>
+                        <p class="text-[10px] text-slate-400 mt-1">앞으로 실제 배정된 지도 중에서 선택합니다.</p>
                     </div>
                     <div>
                         <label class="block font-bold text-slate-700 mb-1">요청 사유 및 메시지</label>
@@ -383,6 +411,11 @@
                     <div>
                         <label class="block font-bold text-slate-700 mb-1">회의 시간 (5분 단위)</label>
                         <input id="meeting-time" type="datetime-local" step="300" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold">
+                    </div>
+                    <div>
+                        <div class="flex justify-between mb-1"><label class="font-bold">소집 대상 회원</label><button type="button" onclick="toggleAllMeetingTargets(true)" class="text-indigo-600 font-bold">전체 선택</button></div>
+                        <p class="text-[10px] text-slate-400 mb-2">체크된 회원만 푸시 알림과 참석/불참 응답 권한을 받습니다. 다른 회원도 회의 내용은 볼 수 있습니다.</p>
+                        <div id="meeting-target-members" class="max-h-36 overflow-y-auto bg-slate-50 border border-slate-200 rounded-xl p-2 space-y-1"></div>
                     </div>
                     <button onclick="submitMeeting()" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm transition shadow-sm mt-2">회의 소집 및 알림 발송</button>
                 </div>
@@ -735,7 +768,7 @@
 
             const { data, error } = await sb
                 .from('users')
-                .select('id,grade,class,number,name')
+                .select('id,grade,class,number,name,profile_image')
                 .eq('id', authUser.id)
                 .maybeSingle();
 
@@ -1145,12 +1178,12 @@
                             <p class="text-xs text-indigo-100">소속: ${org ? org.name : '없음'} (${role})</p>
                             <p class="text-[11px] text-yellow-200 mt-1 font-mono">조직 코드: <b>${org ? org.code : ''}</b></p>
                         </div>
-                        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
-                            <h3 class="text-xs font-bold text-indigo-600"><i class="fa-solid fa-calendar-check mr-1.5"></i> 다가오는 회의 및 공지 일정</h3>
+                        <div onclick="switchTab('meetings')" class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2 cursor-pointer">
+                            <h3 class="text-xs font-bold text-indigo-600"><i class="fa-solid fa-calendar-check mr-1.5"></i> 회의 <span class="float-right text-[10px] text-slate-400">열기 ›</span></h3>
                             <div id="home-meeting-preview" class="text-xs text-slate-600">추가 일정 없음</div>
                         </div>
-                        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
-                            <h3 class="text-xs font-bold text-rose-600"><i class="fa-solid fa-bullhorn mr-1.5"></i> 전체 공지</h3>
+                        <div onclick="switchTab('announcements')" class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2 cursor-pointer">
+                            <h3 class="text-xs font-bold text-rose-600"><i class="fa-solid fa-bullhorn mr-1.5"></i> 전체 공지 <span class="float-right text-[10px] text-slate-400">열기 ›</span></h3>
                             <div id="home-notice-preview" class="space-y-2 text-xs text-slate-600">등록된 공지가 없습니다.</div>
                         </div>
                         <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
@@ -1159,7 +1192,7 @@
                             <div id="home-attendance-alerts" class="space-y-2"></div>
                             <div class="grid grid-cols-2 gap-2 mt-1">
                                 <button onclick="openGuideAttendanceModal()" class="py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs">지도 출석하기</button>
-                                <button onclick="openModal('swap-modal')" class="py-2 bg-slate-100 hover:bg-slate-200 text-indigo-600 rounded-xl font-bold text-xs transition">대타(스왑) 신청</button>
+                                <button onclick="openSwapModal()" class="py-2 bg-slate-100 hover:bg-slate-200 text-indigo-600 rounded-xl font-bold text-xs transition">대타(스왑) 신청</button>
                             </div>
                         </div>
                         <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
@@ -1200,9 +1233,11 @@
                         </div>
 
                         <div id="records-subcontent" class="space-y-3"></div>
+                        ${isAdmin?`<div class="border-t pt-3"><h3 class="font-bold text-sm mb-2">선도 기록 수정/삭제 요청</h3><div id="discipline-change-requests" class="space-y-2"></div></div>`:''}
                     </div>
                 `;
                 renderDisciplineList();
+                if(isAdmin) renderDisciplineChangeRequests();
             } else if (tab === 'duties') {
                 container.innerHTML = `
                     <div class="space-y-4">
@@ -1238,7 +1273,7 @@
                                 <h2 class="text-base font-bold text-slate-800">회의 소집 및 출석</h2>
                                 <p class="text-[11px] text-slate-500">정기 회의 및 RSVP 투표</p>
                             </div>
-                            ${isAdmin ? `<div class="flex gap-1"><button onclick="openPollModal()" class="bg-violet-600 text-white text-xs px-3 py-2 rounded-xl font-bold">+ 투표</button><button onclick="editingMeetingId=null; document.getElementById('meeting-title').value=''; document.getElementById('meeting-details').value=''; document.getElementById('meeting-time').value=''; openModal('meeting-modal')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-2 rounded-xl font-bold transition shadow-sm">+ 회의</button></div>` : ''}
+                            ${isAdmin ? `<div class="flex gap-1"><button onclick="openPollModal()" class="bg-violet-600 text-white text-xs px-3 py-2 rounded-xl font-bold">+ 투표</button><button onclick="openNewMeetingModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-2 rounded-xl font-bold transition shadow-sm">+ 회의</button></div>` : ''}
                         </div>
                         <div id="meeting-list" class="space-y-3"></div>
                         <div class="border-t border-slate-200 pt-3"><h3 class="font-bold text-sm mb-2">회의 투표</h3><div id="poll-list" class="space-y-3"></div></div>
@@ -1275,7 +1310,11 @@
                     <div class="space-y-4 text-xs">
                         <h2 class="text-base font-bold text-slate-800">설정 및 관리</h2>
                         <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
-                            <h3 class="font-bold text-slate-700"><i class="fa-solid fa-user mr-1"></i> 내 정보 수정 (학년 / 반 / 번호)</h3>
+                            <h3 class="font-bold text-slate-700"><i class="fa-solid fa-user mr-1"></i> 내 개인정보</h3>
+                            <div class="flex items-center gap-3 bg-slate-50 rounded-xl p-3">
+                                <img id="my-profile-preview" src="${dbCache.currentUser.profile_image || 'https://placehold.co/96x96/e0e7ff/4f46e5?text=ME'}" class="w-16 h-16 rounded-full object-cover border">
+                                <div class="flex-1"><div class="font-bold text-sm">${dbCache.currentUser.name}</div><div class="text-slate-500 mt-1">${dbCache.currentUser.grade||''} · ${dbCache.currentUser.class||''} · ${dbCache.currentUser.number||''}</div><label class="inline-block mt-2 px-3 py-1.5 bg-white border rounded-lg font-bold text-indigo-600">프로필 사진<input type="file" accept="image/*" onchange="uploadMyProfileImage(event)" class="hidden"></label></div>
+                            </div>
                             <div class="space-y-2">
                                 <div>
                                     <label class="block text-[11px] font-semibold text-slate-600 mb-1">학년</label>
@@ -1333,8 +1372,8 @@
                         <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
                             <h3 class="font-bold text-slate-700"><i class="fa-solid fa-bell mr-1"></i> 지도 전날 알림</h3>
                             <p class="text-slate-600 leading-relaxed">기상 알람이 아니라, 다음 날 지도 일정이 있다는 것을 미리 알려주는 짧은 알림입니다. ON이면 지정한 시간에 알림을 확인합니다.</p>
-                            <label class="flex items-center justify-between bg-slate-50 p-3 rounded-xl"><span class="font-bold">알림 ON/OFF</span><input id="guide-reminder-enabled" type="checkbox" onchange="saveGuideReminderSettings()"></label>
-                            <div><label class="block text-[11px] font-semibold text-slate-600 mb-1">전날 알림 시간</label><input id="guide-reminder-time" type="time" value="20:00" onchange="saveGuideReminderSettings()" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold"></div>
+                            <div class="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl"><span class="font-bold">알림 ON/OFF</span><label class="switch"><input id="guide-reminder-enabled" type="checkbox" onchange="saveGuideReminderSettings()"><span class="switch-slider"></span></label></div>
+                            <div><label class="block text-[11px] font-semibold text-slate-600 mb-1">전날 알림 시간</label><input id="guide-reminder-time" type="time" value="20:00" onchange="saveGuideReminderSettings()" class="w-full bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl font-bold"></div>
                             <button onclick="requestGuideNotificationPermission()" class="w-full py-2.5 bg-indigo-50 text-indigo-600 rounded-xl font-bold">휴대폰 알림 권한 허용</button>
                             <p class="text-[10px] text-slate-400">백그라운드 Web Push를 사용합니다. iPhone/iPad에서는 이 사이트를 홈 화면에 추가한 뒤 앱 아이콘으로 열고 알림 권한을 허용해야 합니다.</p>
                         </div>
@@ -1359,6 +1398,10 @@
             switchTab('records');
         }
 
+        async function uploadMyProfileImage(event){
+            const file=event.target.files?.[0];if(!file)return;if(file.size>2*1024*1024)return showAlert('2MB 이하 사진을 선택해주세요.');
+            const reader=new FileReader();reader.onload=e=>{const img=new Image();img.onload=async()=>{const c=document.createElement('canvas'),scale=Math.min(1,320/Math.max(img.width,img.height));c.width=Math.round(img.width*scale);c.height=Math.round(img.height*scale);c.getContext('2d').drawImage(img,0,0,c.width,c.height);const data=c.toDataURL('image/jpeg',.78),sb=requireSupabase();const{error}=await sb.from('users').update({profile_image:data}).eq('id',dbCache.currentUser.id);if(error)return showAlert('사진 저장 실패: '+error.message);dbCache.currentUser.profile_image=data;saveLocalCache();document.getElementById('my-profile-preview').src=data;showAlert('프로필 사진을 저장했습니다.')} ;img.src=e.target.result};reader.readAsDataURL(file)
+        }
         async function updateUserProfile() {
             const grade = document.getElementById('settings-grade').value;
             const cls = document.getElementById('settings-class').value;
@@ -1743,9 +1786,9 @@
                             ${r.memo ? `<p class="text-slate-500 text-[11px]">메모: ${r.memo}</p>` : ''}
                             ${isAdmin ? `
                             <div class="flex gap-2 pt-2 border-t border-slate-200/60">
-                                <button onclick="editDiscipline(${r.id})" class="flex-1 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-bold rounded-lg transition text-center">수정</button>
-                                <button onclick="deleteDiscipline(${r.id}, '${targetKey}')" class="flex-1 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-lg transition text-center">삭제</button>
-                            </div>` : ''}
+                                <button onclick="editDiscipline(${r.id})" class="flex-1 py-1.5 bg-indigo-50 text-indigo-600 font-bold rounded-lg">수정</button>
+                                <button onclick="deleteDiscipline(${r.id}, '${targetKey}')" class="flex-1 py-1.5 bg-rose-50 text-rose-600 font-bold rounded-lg">삭제</button>
+                            </div>` : `<div class="pt-2 border-t"><button onclick="openDisciplineChangeRequest(${r.id})" class="w-full py-1.5 bg-indigo-50 text-indigo-600 font-bold rounded-lg">수정/삭제 요청</button></div>`}
                         </div>
                     `).join('')}
                     ${studentRecords.length === 4 ? `
@@ -1758,6 +1801,25 @@
             openModal('discipline-detail-modal');
         }
 
+        function openDisciplineChangeRequest(id){
+            const r=(dbCache.disciplines[dbCache.currentOrgCode]||[]).find(x=>String(x.id)===String(id));if(!r)return;
+            document.getElementById('discipline-request-record-id').value=id;document.getElementById('discipline-request-type').value='edit';document.getElementById('discipline-request-reason').value=r.reason||'';document.getElementById('discipline-request-memo').value=r.memo||'';document.getElementById('discipline-request-why').value='';toggleDisciplineRequestEditFields();openModal('discipline-request-modal');
+        }
+        function toggleDisciplineRequestEditFields(){document.getElementById('discipline-request-edit-fields')?.classList.toggle('hidden',document.getElementById('discipline-request-type')?.value==='delete')}
+        async function submitDisciplineChangeRequest(){
+            const why=document.getElementById('discipline-request-why').value.trim();if(!why)return showAlert('요청 사유를 입력해주세요.');
+            const list=(dbCache.manualRequests[dbCache.currentOrgCode]||=[]);list.unshift({id:Date.now(),kind:'discipline_change',user:dbCache.currentUser.name,recordId:document.getElementById('discipline-request-record-id').value,action:document.getElementById('discipline-request-type').value,reason:document.getElementById('discipline-request-reason').value.trim(),memo:document.getElementById('discipline-request-memo').value.trim(),why,status:'대기중',date:new Date().toLocaleString()});
+            await syncSubColToFirestore('manual_requests',dbCache.currentOrgCode,list);closeModal('discipline-request-modal');showAlert('관리자에게 요청을 보냈습니다.');
+        }
+        async function resolveDisciplineRequest(id,approve){
+            const req=(dbCache.manualRequests[dbCache.currentOrgCode]||[]).find(x=>String(x.id)===String(id));if(!req||!currentUserIsAdmin())return;
+            if(approve){let list=dbCache.disciplines[dbCache.currentOrgCode]||[],r=list.find(x=>String(x.id)===String(req.recordId));if(r){if(req.action==='delete')dbCache.disciplines[dbCache.currentOrgCode]=list.filter(x=>String(x.id)!==String(req.recordId));else{r.reason=req.reason;r.memo=req.memo}await syncSubColToFirestore('disciplines',dbCache.currentOrgCode,dbCache.disciplines[dbCache.currentOrgCode])}}
+            req.status=approve?'승인':'거절';await syncSubColToFirestore('manual_requests',dbCache.currentOrgCode,dbCache.manualRequests[dbCache.currentOrgCode]);switchTab('records');showAlert(approve?'승인해 반영했습니다.':'요청을 거절했습니다.');
+        }
+        function renderDisciplineChangeRequests(){
+            const el=document.getElementById('discipline-change-requests');if(!el)return;const r=(dbCache.manualRequests[dbCache.currentOrgCode]||[]).filter(x=>x.kind==='discipline_change'&&x.status==='대기중');
+            el.innerHTML=r.length?r.map(x=>`<div class="bg-white border rounded-xl p-3 text-xs space-y-2"><b>${x.user} · ${x.action==='delete'?'삭제':'수정'} 요청</b><p>사유: ${x.why}</p><div class="grid grid-cols-2 gap-2"><button onclick="resolveDisciplineRequest(${x.id},true)" class="py-2 bg-emerald-50 text-emerald-700 rounded-lg font-bold">승인</button><button onclick="resolveDisciplineRequest(${x.id},false)" class="py-2 bg-rose-50 text-rose-600 rounded-lg font-bold">거절</button></div></div>`).join(''):'<p class="text-slate-400">대기 중인 요청 없음</p>';
+        }
         function editDiscipline(id) {
             const list = dbCache.disciplines[dbCache.currentOrgCode] || [];
             const r = list.find(d => d.id == id);
@@ -1907,45 +1969,26 @@
             renderDutyScheduleList(); updateHomeDashboardData(); showAlert('지도 중지를 해제했습니다.');
         }
 
-        function renderDutyScheduleList() {
-            const container = document.getElementById('duty-schedule-list'); if (!container) return;
-            const all = dbCache.duties[dbCache.currentOrgCode] || [];
-            const list = all.filter(x => x.kind !== 'pause');
-            const pause = getDutyPause();
-            const status = document.getElementById('duty-pause-status');
-            if (status) status.innerHTML = pause ? `<div class="text-amber-700 font-bold">현재 ${pause.endDate}까지 지도 중지 중 <button onclick="resumeDuties()" class="ml-2 underline">지금 해제</button></div>` : '<div class="text-slate-500">현재 지도 중지 없음</div>';
-            if (!list.length) { container.innerHTML='<p class="text-center text-xs text-slate-400 py-6">배정된 선도 지도 일정이 없습니다.</p>'; return; }
-
-            const todayStr = localDateStr();
-            let latestEnd = todayStr;
-            list.forEach(x => { if ((x.endDate || todayStr) > latestEnd) latestEnd = x.endDate || todayStr; });
-            const datedGroups = {};
-            for (let dateStr = todayStr, guard=0; dateStr <= latestEnd && guard < 740; dateStr = kstDateAdd(dateStr,1), guard++) {
-                if (isDutyPausedOn(dateStr)) continue;
-                const day = dayNameFromDate(dateStr);
-                if (day==='토요일' || day==='일요일') continue;
-                list.filter(x => x.day===day && (!x.startDate || x.startDate<=dateStr) && (!x.endDate || dateStr<=x.endDate)).forEach(base=>{
-                    let actualName = canonicalMemberName(base.memberName);
-                    const swaps=(dbCache.swaps[dbCache.currentOrgCode]||[]).filter(sw=>sw.status==='완료'&&sw.date===dateStr);
-                    swaps.forEach(sw=>{
-                        if (actualName===canonicalMemberName(sw.user)) actualName=canonicalMemberName(sw.acceptedBy);
-                        else if (actualName===canonicalMemberName(sw.acceptedBy)) actualName=canonicalMemberName(sw.user);
-                    });
-                    const k=`${dateStr}|${day}|${base.dutyType}`;
-                    (datedGroups[k] ||= []).push({...base, memberName:actualName});
-                });
-            }
-            const entries = Object.entries(datedGroups);
-            if (!entries.length) { container.innerHTML='<p class="text-center text-xs text-slate-400 py-6">현재 표시할 지도 일정이 없습니다.</p>'; return; }
-            container.innerHTML = entries.map(([k,arr])=>{
-                const [date,day,type]=k.split('|');
-                const unique=[]; arr.forEach(x=>{if(!unique.some(u=>u.memberName===x.memberName&&u.time===x.time))unique.push(x)});
-                return `<div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm text-xs space-y-2">
-                    <div class="flex flex-wrap gap-1.5"><span class="px-2 py-1 bg-slate-100 text-slate-700 font-bold rounded-lg">${date}</span><span class="px-2 py-1 bg-indigo-50 text-indigo-600 font-bold rounded-lg">${day}</span><span class="px-2 py-1 bg-amber-50 text-amber-700 font-bold rounded-lg">${type}</span></div>
-                    <div class="text-[11px] text-slate-500">같은 날 · 같은 지도 유형 담당자</div>
-                    <div class="flex flex-wrap gap-2">${unique.map(x=>`<span class="bg-slate-50 border px-2 py-1 rounded-lg inline-flex items-center gap-1.5"><b>${x.memberName}</b> · ${x.time}${x.endDate?` · ~${x.endDate}`:''}${currentUserIsAdmin()?`<button onclick="deleteDutySchedule(${x.id})" class="ml-1 text-rose-600 font-bold" title="이 선도 일정 삭제">삭제</button>`:''}</span>`).join('')}</div>
-                </div>`;
-            }).join('');
+        function nextDateForDutyBase(base){
+            const today=localDateStr(),end=base.endDate||kstDateAdd(today,365);
+            for(let ds=today,g=0;ds<=end&&g<370;ds=kstDateAdd(ds,1),g++)if(!isDutyPausedOn(ds)&&dayNameFromDate(ds)===base.day&&(!base.startDate||base.startDate<=ds))return ds;
+            return '9999-12-31';
+        }
+        function openDutyMemberSchedule(name){
+            const rows=[],today=localDateStr(),raw=(dbCache.duties[dbCache.currentOrgCode]||[]).filter(x=>x.kind!=='pause');let latest=today;
+            raw.forEach(x=>{if((x.endDate||today)>latest)latest=x.endDate||today});
+            for(let ds=today,g=0;ds<=latest&&g<740;ds=kstDateAdd(ds,1),g++)getEffectiveDutyForDate(name,ds).forEach(d=>rows.push({...d,date:ds}));
+            rows.sort((a,b)=>a.date.localeCompare(b.date)||String(a.time).localeCompare(String(b.time)));
+            document.getElementById('duty-member-title').innerText=`${name} · 이후 지도 일정`;
+            document.getElementById('duty-member-schedule').innerHTML=rows.length?rows.map(d=>`<div class="bg-slate-50 border rounded-xl p-3"><b>${d.date} · ${dayNameFromDate(d.date)}</b><div>${d.dutyType} · ${d.time}</div></div>`).join(''):'<p class="text-slate-400">앞으로 일정이 없습니다.</p>';
+            openModal('duty-member-modal');
+        }
+        function renderDutyScheduleList(){
+            const el=document.getElementById('duty-schedule-list');if(!el)return;const list=(dbCache.duties[dbCache.currentOrgCode]||[]).filter(x=>x.kind!=='pause');
+            const pause=getDutyPause(),status=document.getElementById('duty-pause-status');if(status)status.innerHTML=pause?`<div class="text-amber-700 font-bold">현재 ${pause.endDate}까지 지도 중지 중 <button onclick="resumeDuties()" class="ml-2 underline">지금 해제</button></div>`:'<div class="text-slate-500">현재 지도 중지 없음</div>';
+            if(!list.length){el.innerHTML='<p class="text-center text-xs text-slate-400 py-6">배정된 일정이 없습니다.</p>';return}
+            const groups=['월요일','화요일','수요일','목요일','금요일'].map(day=>{const bases=list.filter(x=>x.day===day);return{day,bases,next:bases.length?bases.map(nextDateForDutyBase).sort()[0]:'9999-12-31'}}).filter(x=>x.bases.length).sort((a,b)=>a.next.localeCompare(b.next));
+            el.innerHTML=groups.map((g,idx)=>`<details class="bg-white rounded-2xl border shadow-sm overflow-hidden" ${idx===0?'open':''}><summary class="p-4 cursor-pointer flex justify-between"><b>${g.day}</b><span class="text-[11px] text-indigo-600">다음 지도 ${g.next}</span></summary><div class="border-t p-3 space-y-2">${[...new Set(g.bases.map(x=>canonicalMemberName(x.memberName)))].map(name=>`<button onclick="openDutyMemberSchedule(${JSON.stringify(name)})" class="w-full text-left bg-slate-50 border rounded-xl p-3"><b>${name}</b><div class="text-[10px] text-slate-500 mt-1">${g.bases.filter(x=>canonicalMemberName(x.memberName)===name).map(x=>`${x.dutyType} ${x.time}`).join(' · ')}</div></button>`).join('')}</div></details>`).join('');
         }
 
         async function deleteDutySchedule(id){
@@ -2006,8 +2049,15 @@
             const rows=dbCache.guideAttendance[dbCache.currentOrgCode]||[];
             el.innerHTML=rows.length?rows.slice(0,80).map(a=>{
                 const st=attendanceStatusLabel(a), cls=st==='결석'?'text-rose-600':st==='지각'?'text-amber-600':'text-emerald-600';
-                return `<div class="bg-white border border-slate-200 rounded-xl p-3 text-xs flex justify-between gap-2"><span><b>${a.user}</b> · ${a.type}${a.time?' · '+a.time:''}<b class="ml-2 ${cls}">${st}</b></span><span class="text-slate-500">${a.date}</span></div>`;
+                return `<div class="bg-white border border-slate-200 rounded-xl p-3 text-xs flex justify-between gap-2"><span><b>${a.user}</b> · ${a.type}${a.time?' · '+a.time:''}<b class="ml-2 ${cls}">${st}</b></span><span class="flex items-center gap-2"><span class="text-slate-500">${a.date}</span><button onclick="deleteGuideAttendance(${JSON.stringify(a.id)})" class="text-rose-600 font-bold">삭제</button></span></div>`;
             }).join(''):'<p class="text-xs text-slate-400">아직 지도 출석 기록이 없습니다.</p>';
+        }
+        async function deleteGuideAttendance(id){
+            if(!currentUserIsAdmin())return showAlert('관리자만 삭제할 수 있습니다.');
+            if(!confirm('이 지도 출석 보고를 삭제하시겠습니까?'))return;
+            dbCache.guideAttendance[dbCache.currentOrgCode]=(dbCache.guideAttendance[dbCache.currentOrgCode]||[]).filter(a=>String(a.id)!==String(id));
+            await syncSubColToFirestore('guide_attendance',dbCache.currentOrgCode,dbCache.guideAttendance[dbCache.currentOrgCode]);
+            renderGuideAttendanceReport(); renderHomeAttendanceAlerts(); showAlert('지도 출석 보고가 삭제되었습니다.');
         }
         function renderHomeAttendanceAlerts(){
             const el=document.getElementById('home-attendance-alerts'); if(!el)return;
@@ -2022,14 +2072,20 @@
             renderHomeAttendanceAlerts(); showAlert('홈의 지각·결석 알림을 삭제했습니다. 출석 보고 기록은 유지됩니다.');
         }
 
-        function submitSwap() {
-            const date=document.getElementById('swap-date').value, reason=document.getElementById('swap-reason').value.trim();
-            if (!date) return showAlert('교체할 날짜를 선택해주세요.');
-            if (!getEffectiveDutyForDate(dbCache.currentUser.name,date).length) return showAlert('선택한 날짜에 본인에게 배정된 지도 일정이 없습니다.');
-            const swap={id:Date.now(),user:dbCache.currentUser.name,date,reason,status:'대기중',acceptedBy:null};
-            (dbCache.swaps[dbCache.currentOrgCode] ||= []).unshift(swap);
-            syncSubColToFirestore('swaps',dbCache.currentOrgCode,dbCache.swaps[dbCache.currentOrgCode]); closeModal('swap-modal');
-            if(currentTab==='duties')renderSwapList(); showAlert('대타 스왑 요청이 등록되었습니다.');
+        function getMyUpcomingDutyChoices(){
+            const out=[],today=localDateStr(),raw=(dbCache.duties[dbCache.currentOrgCode]||[]).filter(x=>x.kind!=='pause'); let latest=today;
+            raw.forEach(x=>{if((x.endDate||today)>latest)latest=x.endDate||today});
+            for(let ds=today,g=0;ds<=latest&&g<740;ds=kstDateAdd(ds,1),g++)getEffectiveDutyForDate(dbCache.currentUser.name,ds).forEach(d=>out.push({...d,date:ds}));
+            return out.sort((a,b)=>a.date.localeCompare(b.date)||String(a.time).localeCompare(String(b.time)));
+        }
+        function openSwapModal(){
+            const sel=document.getElementById('swap-assignment'),c=getMyUpcomingDutyChoices(); if(!c.length)return showAlert('앞으로 배정된 지도 일정이 없습니다.');
+            sel.innerHTML=c.map((d,i)=>`<option value="${i}">${d.date} · ${d.dutyType} · ${d.time}</option>`).join(''); sel._choices=c; openModal('swap-modal');
+        }
+        function submitSwap(){
+            const sel=document.getElementById('swap-assignment'),d=(sel?._choices||[])[Number(sel?.value||0)],reason=document.getElementById('swap-reason').value.trim(); if(!d)return showAlert('지도를 선택해주세요.');
+            (dbCache.swaps[dbCache.currentOrgCode]||=[]).unshift({id:Date.now(),user:dbCache.currentUser.name,date:d.date,dutyType:d.dutyType,time:d.time,reason,status:'대기중',acceptedBy:null});
+            syncSubColToFirestore('swaps',dbCache.currentOrgCode,dbCache.swaps[dbCache.currentOrgCode]);closeModal('swap-modal');if(currentTab==='duties')renderSwapList();showAlert('대타 요청이 등록되었습니다.');
         }
 
         function renderSwapList() {
@@ -2054,36 +2110,19 @@
             syncSubColToFirestore('swaps',dbCache.currentOrgCode,list); renderSwapList(); showAlert(`${s.date} 하루 일정만 ${s.user} 님과 맞교환되었습니다.`);
         }
 
-        let editingMeetingId = null;
-        function openMeetingForEdit(id) {
-            const m=(dbCache.meetings[dbCache.currentOrgCode]||[]).find(x=>x.id===id); if(!m)return;
-            editingMeetingId=id; document.getElementById('meeting-title').value=m.title; document.getElementById('meeting-details').value=m.details||'';
-            document.getElementById('meeting-time').value=m.time; const sel=document.getElementById('meeting-loc-select');
-            if(['학생회실','컨퍼런스홀'].includes(m.loc)){sel.value=m.loc;toggleMeetingCustomLoc(m.loc);} else {sel.value='기타';toggleMeetingCustomLoc('기타');document.getElementById('meeting-custom-loc').value=m.loc;}
-            openModal('meeting-modal');
-        }
-        function submitMeeting() {
-            const title=document.getElementById('meeting-title').value.trim(), details=document.getElementById('meeting-details').value.trim(); let loc=document.getElementById('meeting-loc-select').value;
-            if(loc==='기타')loc=document.getElementById('meeting-custom-loc').value.trim()||'기타 장소'; const time=document.getElementById('meeting-time').value;
-            if(!title||!time)return showAlert('제목과 시간을 모두 입력해주세요.');
-            const list=(dbCache.meetings[dbCache.currentOrgCode] ||= []);
-            if(editingMeetingId){ const m=list.find(x=>x.id===editingMeetingId); Object.assign(m,{title,details,loc,time,updatedAt:new Date().toISOString()}); createSystemNotice(`회의 수정 안내: ${title}`,`회의 내용이 수정되었습니다.\n장소: ${loc}\n시간: ${time.replace('T',' ')}\n${details}`); editingMeetingId=null; showAlert('회의가 수정되었고 재공지가 등록되었습니다.'); }
-            else { list.unshift({id:Date.now(),title,details,loc,time,rsvps:{},rsvpReasons:{}}); showAlert('회의 소집 공지가 등록되었습니다.'); }
-            syncSubColToFirestore('meetings',dbCache.currentOrgCode,list); closeModal('meeting-modal'); if(currentTab==='meetings')renderMeetingList();
-        }
-        function deleteMeeting(id){ if(!confirm('이 회의를 삭제하시겠습니까?'))return; const list=dbCache.meetings[dbCache.currentOrgCode]||[]; const m=list.find(x=>x.id===id); dbCache.meetings[dbCache.currentOrgCode]=list.filter(x=>x.id!==id); syncSubColToFirestore('meetings',dbCache.currentOrgCode,dbCache.meetings[dbCache.currentOrgCode]); createSystemNotice('회의 취소 안내',`${m?.title||'회의'} 일정이 취소되었습니다.`); renderMeetingList(); }
-        function handleRSVP(mid,status){
-            const list=dbCache.meetings[dbCache.currentOrgCode]||[],m=list.find(x=>x.id===mid);if(!m)return; m.rsvps ||= {}; m.rsvpReasons ||= {};
-            if(status==='불참'){const reason=prompt('불참 사유를 입력해주세요.'); if(reason===null)return; if(!reason.trim())return showAlert('불참 사유를 입력해야 합니다.'); m.rsvpReasons[dbCache.currentUser.name]=reason.trim();} else delete m.rsvpReasons[dbCache.currentUser.name];
-            m.rsvps[dbCache.currentUser.name]=status; syncSubColToFirestore('meetings',dbCache.currentOrgCode,list);renderMeetingList();showAlert('참석 여부가 관리자에게 보고되었습니다.');
-        }
-        function renderMeetingList(){
-            const container=document.getElementById('meeting-list'),list=dbCache.meetings[dbCache.currentOrgCode]||[]; if(!list.length){container.innerHTML='<p class="text-center text-xs text-slate-400 py-8">소집된 회의가 없습니다.</p>';return;}
-            const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode),mem=org?.members.find(x=>x.name===dbCache.currentUser.name),isAdmin=['단장','전교회장','부단장','전교부회장'].includes(mem?.role);
-            container.innerHTML=list.map(m=>{const my=m.rsvps?.[dbCache.currentUser.name], reports=Object.entries(m.rsvps||{}).map(([name,status])=>`<div class="flex justify-between border-t py-1"><span><b>${name}</b> · ${status}</span><span class="text-slate-500">${status==='불참'?(m.rsvpReasons?.[name]||'사유 없음'):''}</span></div>`).join(''); return `<div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2.5 text-xs"><div class="flex justify-between"><span class="text-sm font-bold">${m.title}</span><span class="text-indigo-600 bg-indigo-50 px-2 rounded-full">${m.loc}</span></div><p class="text-slate-500">${m.time.replace('T',' ')}</p>${m.details?`<p class="bg-slate-50 p-2 rounded-lg whitespace-pre-line">${m.details}</p>`:''}<div class="grid grid-cols-2 gap-2"><button onclick="handleRSVP(${m.id},'참석')" class="py-2 rounded-xl font-bold ${my==='참석'?'bg-emerald-600 text-white':'bg-slate-100'}">참석</button><button onclick="handleRSVP(${m.id},'불참')" class="py-2 rounded-xl font-bold ${my==='불참'?'bg-rose-600 text-white':'bg-slate-100'}">불참</button></div>${my==='불참'?`<p class="text-rose-600">내 불참 사유: ${m.rsvpReasons?.[dbCache.currentUser.name]||''}</p>`:''}${isAdmin?`<div class="bg-slate-50 p-2 rounded-xl"><b>참석/불참 보고</b>${reports||'<p class="text-slate-400 mt-1">아직 응답 없음</p>'}</div><div class="flex gap-2"><button onclick="openMeetingForEdit(${m.id})" class="flex-1 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold">수정</button><button onclick="deleteMeeting(${m.id})" class="flex-1 py-2 bg-rose-50 text-rose-600 rounded-xl font-bold">삭제</button></div>`:''}</div>`;}).join('');
-        }
+        let editingMeetingId=null;
+        function renderMeetingTargetMembers(selected=null){const el=document.getElementById('meeting-target-members'),org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);if(!el||!org)return;const set=new Set(selected||org.members.map(m=>m.name));el.innerHTML=org.members.map(m=>`<label class="flex items-center gap-2 p-1.5"><input class="meeting-target-check" type="checkbox" value="${m.name}" ${set.has(m.name)?'checked':''}>${m.name} <span class="text-slate-400">(${m.role})</span></label>`).join('')}
+        function toggleAllMeetingTargets(){document.querySelectorAll('.meeting-target-check').forEach(x=>x.checked=true)}
+        function selectedMeetingTargets(){return[...document.querySelectorAll('.meeting-target-check:checked')].map(x=>x.value)}
+        function openNewMeetingModal(){editingMeetingId=null;document.getElementById('meeting-title').value='';document.getElementById('meeting-details').value='';document.getElementById('meeting-time').value='';renderMeetingTargetMembers();openModal('meeting-modal')}
+        function openMeetingForEdit(id){const m=(dbCache.meetings[dbCache.currentOrgCode]||[]).find(x=>x.id===id);if(!m)return;editingMeetingId=id;document.getElementById('meeting-title').value=m.title;document.getElementById('meeting-details').value=m.details||'';document.getElementById('meeting-time').value=m.time;const sel=document.getElementById('meeting-loc-select');if(['학생회실','컨퍼런스홀'].includes(m.loc)){sel.value=m.loc;toggleMeetingCustomLoc(m.loc)}else{sel.value='기타';toggleMeetingCustomLoc('기타');document.getElementById('meeting-custom-loc').value=m.loc}renderMeetingTargetMembers(m.targets||null);openModal('meeting-modal')}
+        async function sendCouncilPush(kind,title,body,targetNames=null){try{const sb=requireSupabase();if(!sb)return;const{data:{session}}=await sb.auth.getSession();if(!session)return;await fetch(`${SUPABASE_URL}/functions/v1/send-council-push`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`,'apikey':SUPABASE_ANON_KEY},body:JSON.stringify({orgCode:dbCache.currentOrgCode,kind,title,body,targetNames})})}catch(e){console.warn('푸시 실패',e)}}
+        async function submitMeeting(){const title=document.getElementById('meeting-title').value.trim(),details=document.getElementById('meeting-details').value.trim();let loc=document.getElementById('meeting-loc-select').value;if(loc==='기타')loc=document.getElementById('meeting-custom-loc').value.trim()||'기타 장소';const time=document.getElementById('meeting-time').value,targets=selectedMeetingTargets();if(!title||!time)return showAlert('제목과 시간을 입력해주세요.');if(!targets.length)return showAlert('소집 회원을 선택해주세요.');const list=(dbCache.meetings[dbCache.currentOrgCode]||=[]);if(editingMeetingId){const m=list.find(x=>x.id===editingMeetingId);Object.assign(m,{title,details,loc,time,targets});await sendCouncilPush('meeting',`회의 수정: ${title}`,`${time.replace('T',' ')} · ${loc}`,targets);editingMeetingId=null}else{list.unshift({id:Date.now(),title,details,loc,time,targets,rsvps:{},rsvpReasons:{}});await sendCouncilPush('meeting',`회의 소집: ${title}`,`${time.replace('T',' ')} · ${loc}`,targets)}await syncSubColToFirestore('meetings',dbCache.currentOrgCode,list);closeModal('meeting-modal');if(currentTab==='meetings')renderMeetingList();showAlert('회의가 저장되었습니다.')}
+        function deleteMeeting(id){if(!confirm('이 회의를 삭제하시겠습니까?'))return;dbCache.meetings[dbCache.currentOrgCode]=(dbCache.meetings[dbCache.currentOrgCode]||[]).filter(x=>x.id!==id);syncSubColToFirestore('meetings',dbCache.currentOrgCode,dbCache.meetings[dbCache.currentOrgCode]);renderMeetingList()}
+        function handleRSVP(mid,status){const list=dbCache.meetings[dbCache.currentOrgCode]||[],m=list.find(x=>x.id===mid);if(!m)return;if(Array.isArray(m.targets)&&!m.targets.includes(dbCache.currentUser.name))return showAlert('소집 대상자가 아닙니다.');m.rsvps||={};m.rsvpReasons||={};if(status==='불참'){const reason=prompt('불참 사유를 입력해주세요.');if(reason===null)return;if(!reason.trim())return showAlert('사유를 입력해주세요.');m.rsvpReasons[dbCache.currentUser.name]=reason.trim()}else delete m.rsvpReasons[dbCache.currentUser.name];m.rsvps[dbCache.currentUser.name]=status;syncSubColToFirestore('meetings',dbCache.currentOrgCode,list);renderMeetingList()}
+        function renderMeetingList(){const el=document.getElementById('meeting-list'),list=dbCache.meetings[dbCache.currentOrgCode]||[],org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);if(!list.length){el.innerHTML='<p class="text-center text-xs text-slate-400 py-8">소집된 회의가 없습니다.</p>';return}el.innerHTML=list.map(m=>{const target=!Array.isArray(m.targets)||m.targets.includes(dbCache.currentUser.name),my=m.rsvps?.[dbCache.currentUser.name],reports=Object.entries(m.rsvps||{}).map(([n,st])=>`<div class="flex justify-between border-t py-1"><span><b>${n}</b> · ${st}</span><span>${st==='불참'?(m.rsvpReasons?.[n]||''):''}</span></div>`).join('');return`<div class="bg-white p-4 rounded-2xl border shadow-sm space-y-2 text-xs"><div class="flex justify-between"><b class="text-sm">${m.title}</b><span>${m.loc}</span></div><p>${m.time.replace('T',' ')}</p>${m.details?`<p class="bg-slate-50 p-2 rounded-lg whitespace-pre-line">${m.details}</p>`:''}${target?`<div class="grid grid-cols-2 gap-2"><button onclick="handleRSVP(${m.id},'참석')" class="py-2 rounded-xl font-bold ${my==='참석'?'bg-emerald-600 text-white':'bg-slate-100'}">참석</button><button onclick="handleRSVP(${m.id},'불참')" class="py-2 rounded-xl font-bold ${my==='불참'?'bg-rose-600 text-white':'bg-slate-100'}">불참</button></div>`:`<div class="bg-slate-50 p-2 rounded-lg text-slate-500">열람만 가능 · 참석/불참 응답 대상 아님</div>`}${currentUserIsAdmin()?`<div class="bg-slate-50 p-2 rounded-xl"><b>소집 대상</b><p>${(m.targets||org.members.map(x=>x.name)).join(', ')}</p><b>응답</b>${reports||'<p>아직 응답 없음</p>'}</div><div class="flex gap-2"><button onclick="openMeetingForEdit(${m.id})" class="flex-1 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold">수정</button><button onclick="deleteMeeting(${m.id})" class="flex-1 py-2 bg-rose-50 text-rose-600 rounded-xl font-bold">삭제</button></div>`:''}</div>`}).join('')}
 
-        function submitNotice() {
+        async function submitNotice() {
             const title = document.getElementById('notice-title').value.trim();
             const content = document.getElementById('notice-content').value.trim();
             if (!title || !content) {
@@ -2093,7 +2132,8 @@
             const notice = { id: Date.now(), title, content, date: new Date().toLocaleDateString() };
             if (!dbCache.notices[dbCache.currentOrgCode]) dbCache.notices[dbCache.currentOrgCode] = [];
             dbCache.notices[dbCache.currentOrgCode].unshift(notice);
-            syncSubColToFirestore('notices', dbCache.currentOrgCode, dbCache.notices[dbCache.currentOrgCode]);
+            await syncSubColToFirestore('notices', dbCache.currentOrgCode, dbCache.notices[dbCache.currentOrgCode]);
+            await sendCouncilPush('notice', `전체 공지: ${title}`, content, null);
             closeModal('notice-modal');
             if (currentTab === 'announcements') renderNoticeList();
             showAlert('공지사항이 등록되었습니다.');
@@ -2305,7 +2345,7 @@
         }
 
 
-        const VAPID_PUBLIC_KEY = 'BH_wvskS99dY_Kv5iFQh4W5DmRi6N1fGOvZmeNPaTYsRWX1wNqruDVjsjbLgbziaa3hoH8F22I8zalWjooSzYR4';
+        const VAPID_PUBLIC_KEY = 'BF5Mtfl9CqDctcYisMa8OIp_OZqReQma5PghSMzE_LSyWtRNI7Jsyn6iGiDH8nohzhopsSdZYt_HFylUo1d_zt4';
 
         function reminderStorageKey(){
             return `sc_guide_reminder_${dbCache.currentUser?.id || dbCache.currentUser?.name || 'user'}`;
