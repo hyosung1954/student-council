@@ -1,0 +1,10 @@
+{
+  "name": "학생회 통합 관리 플랫폼",
+  "short_name": "학생회",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#4f46e5",
+  "lang": "ko-KR"
+}
