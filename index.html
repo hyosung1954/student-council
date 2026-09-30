@@ -42,7 +42,7 @@
             z-index: 999995 !important;
         }
     </style>
-</head>
+    <link rel="manifest" href="./manifest.webmanifest">\n    <meta name="theme-color" content="#4f46e5">\n    <meta name="apple-mobile-web-app-capable" content="yes">\n</head>
 <body class="bg-slate-100 flex justify-center items-center min-h-screen m-0 p-0">
 
     <!-- Absolute Foreground Global Alert / Toast Container -->
@@ -1333,7 +1333,7 @@
                             <label class="flex items-center justify-between bg-slate-50 p-3 rounded-xl"><span class="font-bold">알림 ON/OFF</span><input id="guide-reminder-enabled" type="checkbox" onchange="saveGuideReminderSettings()"></label>
                             <div><label class="block text-[11px] font-semibold text-slate-600 mb-1">전날 알림 시간</label><input id="guide-reminder-time" type="time" value="20:00" onchange="saveGuideReminderSettings()" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold"></div>
                             <button onclick="requestGuideNotificationPermission()" class="w-full py-2.5 bg-indigo-50 text-indigo-600 rounded-xl font-bold">휴대폰 알림 권한 허용</button>
-                            <p class="text-[10px] text-slate-400">브라우저 정책상 이 버전은 사이트/PWA가 실행 중일 때 알림을 확인합니다. 사이트를 완전히 종료한 상태에서도 자동 푸시를 받으려면 별도의 푸시 서버 설정이 필요합니다.</p>
+                            <p class="text-[10px] text-slate-400">백그라운드 Web Push를 사용합니다. iPhone/iPad에서는 이 사이트를 홈 화면에 추가한 뒤 앱 아이콘으로 열고 알림 권한을 허용해야 합니다.</p>
                         </div>
 
                         <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
@@ -2302,46 +2302,98 @@
         }
 
 
+        const VAPID_PUBLIC_KEY = 'BPMLk6xJ2wGfDgWIc5HOhGOoLY_tbCNmzM9wbAmDvTKpvSSb_iN3e6JSr_7MeXWona9RZSG2odIKfSCkWzZ3U6k';
+
         function reminderStorageKey(){
             return `sc_guide_reminder_${dbCache.currentUser?.id || dbCache.currentUser?.name || 'user'}`;
         }
         function getGuideReminderSettings(){
-            try { return JSON.parse(safeStorage.getItem(reminderStorageKey()) || '{"enabled":false,"time":"20:00","lastKey":""}'); }
-            catch(e){ return {enabled:false,time:'20:00',lastKey:''}; }
+            try { return JSON.parse(safeStorage.getItem(reminderStorageKey()) || '{"enabled":false,"time":"20:00"}'); }
+            catch(e){ return {enabled:false,time:'20:00'}; }
         }
-        function loadGuideReminderSettings(){
-            const s=getGuideReminderSettings(), en=document.getElementById('guide-reminder-enabled'), tm=document.getElementById('guide-reminder-time');
+        function urlBase64ToUint8Array(v){
+            const padding='='.repeat((4-v.length%4)%4);
+            const raw=atob((v+padding).replace(/-/g,'+').replace(/_/g,'/'));
+            return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));
+        }
+        async function getPushRegistration(){
+            if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
+            return navigator.serviceWorker.register('./sw.js',{scope:'./'});
+        }
+        async function syncPushSubscription(enabled,time){
+            const sb=requireSupabase(); if(!sb) return false;
+            const {data:{user},error:userError}=await sb.auth.getUser();
+            if(userError||!user) throw new Error('로그인 정보를 확인할 수 없습니다.');
+            const reg=await getPushRegistration();
+            let sub=await reg.pushManager.getSubscription();
+
+            if(!enabled){
+                let q=sb.from('push_subscriptions').update({reminder_enabled:false,updated_at:new Date().toISOString()}).eq('user_id',user.id);
+                if(sub) q=q.eq('endpoint',sub.endpoint);
+                const {error}=await q; if(error) throw error;
+                return true;
+            }
+
+            if(!('Notification' in window)) throw new Error('이 브라우저는 알림 기능을 지원하지 않습니다.');
+            let permission=Notification.permission;
+            if(permission==='default') permission=await Notification.requestPermission();
+            if(permission!=='granted') throw new Error('알림 권한이 허용되지 않았습니다.');
+
+            if(!sub) sub=await reg.pushManager.subscribe({
+                userVisibleOnly:true,
+                applicationServerKey:urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+            });
+            const j=sub.toJSON();
+            const {error}=await sb.from('push_subscriptions').upsert({
+                user_id:user.id,org_code:dbCache.currentOrgCode,endpoint:sub.endpoint,
+                p256dh:j.keys.p256dh,auth:j.keys.auth,reminder_enabled:true,
+                reminder_time:`${time}:00`,updated_at:new Date().toISOString()
+            },{onConflict:'user_id,endpoint'});
+            if(error) throw error;
+            return true;
+        }
+        async function loadGuideReminderSettings(){
+            const s=getGuideReminderSettings(),en=document.getElementById('guide-reminder-enabled'),tm=document.getElementById('guide-reminder-time');
             if(en) en.checked=!!s.enabled; if(tm) tm.value=s.time||'20:00';
+            try{
+                const sb=requireSupabase(); if(!sb)return;
+                const {data:{user}}=await sb.auth.getUser(); if(!user)return;
+                const {data}=await sb.from('push_subscriptions').select('reminder_enabled,reminder_time')
+                  .eq('user_id',user.id).eq('org_code',dbCache.currentOrgCode)
+                  .order('updated_at',{ascending:false}).limit(1).maybeSingle();
+                if(data){
+                    const x={enabled:!!data.reminder_enabled,time:String(data.reminder_time||'20:00').slice(0,5)};
+                    safeStorage.setItem(reminderStorageKey(),JSON.stringify(x));
+                    if(en) en.checked=x.enabled; if(tm) tm.value=x.time;
+                }
+            }catch(e){console.warn('푸시 설정 로드 실패',e);}
         }
         async function saveGuideReminderSettings(){
-            const en=document.getElementById('guide-reminder-enabled'), tm=document.getElementById('guide-reminder-time');
-            const old=getGuideReminderSettings(), next={...old,enabled:!!en?.checked,time:tm?.value||'20:00'};
-            safeStorage.setItem(reminderStorageKey(),JSON.stringify(next));
-            if(next.enabled) await requestGuideNotificationPermission(false);
-            showAlert(next.enabled?`지도 전날 알림을 ${next.time}로 켰습니다.`:'지도 전날 알림을 껐습니다.');
+            const en=document.getElementById('guide-reminder-enabled'),tm=document.getElementById('guide-reminder-time');
+            const s={enabled:!!en?.checked,time:tm?.value||'20:00'};
+            try{
+                await syncPushSubscription(s.enabled,s.time);
+                safeStorage.setItem(reminderStorageKey(),JSON.stringify(s));
+                showAlert(s.enabled?`지도 전날 푸시 알림을 ${s.time}로 켰습니다.`:'지도 전날 푸시 알림을 껐습니다.');
+            }catch(e){
+                if(en) en.checked=false;
+                showAlert('푸시 알림 설정 실패: '+(e?.message||e));
+            }
         }
         async function requestGuideNotificationPermission(showMessage=true){
-            if(!('Notification' in window)){ if(showMessage) showAlert('이 브라우저는 알림 기능을 지원하지 않습니다.'); return false; }
-            let p=Notification.permission;
-            if(p==='default') p=await Notification.requestPermission();
-            if(showMessage) showAlert(p==='granted'?'알림 권한이 허용되었습니다.':'알림 권한이 허용되지 않았습니다.');
-            return p==='granted';
+            try{
+                const time=document.getElementById('guide-reminder-time')?.value||getGuideReminderSettings().time||'20:00';
+                await syncPushSubscription(true,time);
+                const en=document.getElementById('guide-reminder-enabled'); if(en) en.checked=true;
+                safeStorage.setItem(reminderStorageKey(),JSON.stringify({enabled:true,time}));
+                if(showMessage) showAlert('백그라운드 푸시 알림 등록이 완료되었습니다.');
+                return true;
+            }catch(e){
+                if(showMessage) showAlert('알림 등록 실패: '+(e?.message||e));
+                return false;
+            }
         }
-        async function checkGuideReminder(){
-            if(!dbCache.currentUser || !dbCache.currentOrgCode) return;
-            const s=getGuideReminderSettings(); if(!s.enabled) return;
-            const p=kstParts(), nowMin=Number(p.hour)*60+Number(p.minute), [hh,mm]=(s.time||'20:00').split(':').map(Number);
-            if(nowMin < hh*60+mm) return;
-            const today=`${p.year}-${p.month}-${p.day}`, tomorrow=kstDateAdd(today,1);
-            const assignments=getEffectiveDutyForDate(dbCache.currentUser.name,tomorrow);
-            if(!assignments.length) return;
-            const key=`${today}|${s.time}`;
-            if(s.lastKey===key) return;
-            const body=`내일 지도: ${assignments.map(x=>`${x.dutyType} ${x.time}`).join(', ')}`;
-            if(await requestGuideNotificationPermission(false)) new Notification('학생회 지도 알림',{body,silent:false});
-            s.lastKey=key; safeStorage.setItem(reminderStorageKey(),JSON.stringify(s));
-        }
-        setInterval(checkGuideReminder, 60000);
+        if('serviceWorker' in navigator) window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(console.error));
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
