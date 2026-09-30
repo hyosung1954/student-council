@@ -48,10 +48,11 @@
         .switch input:checked+.switch-slider{background:#4f46e5}.switch input:checked+.switch-slider:before{transform:translateX(20px)}
         #nav-bar{position:fixed!important;left:50%!important;right:auto!important;bottom:0!important;transform:translateX(-50%)!important;width:100%!important;max-width:28rem!important;padding-bottom:max(.5rem,env(safe-area-inset-bottom))!important;z-index:9990!important}
         #main-content{padding-bottom:calc(7rem + env(safe-area-inset-bottom))!important;-webkit-overflow-scrolling:touch;overscroll-behavior-y:auto}
-        #pull-refresh-indicator{position:fixed;top:98px;left:50%;width:38px;height:38px;display:flex;align-items:center;justify-content:center;transform:translateX(-50%) translateY(-70px) scale(.82);z-index:9980;background:#fff;border:1px solid #e2e8f0;border-radius:999px;color:#4f46e5;box-shadow:0 5px 16px rgba(15,23,42,.18);opacity:0;transition:transform .16s ease,opacity .16s ease;pointer-events:none}
-        #pull-refresh-indicator.show{transform:translateX(-50%) translateY(0) scale(1);opacity:1}
-        #pull-refresh-indicator i{font-size:17px;transform:rotate(0deg)}
-        #pull-refresh-indicator.refreshing i{animation:pullRefreshSpin .72s linear infinite}
+        #pull-refresh-indicator{position:fixed;top:50%;left:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;transform:translate(-50%,-50%) scale(.72);z-index:9980;background:rgba(255,255,255,.96);border:1px solid #e2e8f0;border-radius:999px;color:#4f46e5;box-shadow:0 5px 16px rgba(15,23,42,.18);opacity:0;transition:transform .12s ease,opacity .12s ease,background .12s ease,color .12s ease;pointer-events:none}
+        #pull-refresh-indicator.show{transform:translate(-50%,-50%) scale(1);opacity:1}
+        #pull-refresh-indicator.ready{background:#4f46e5;color:#fff}
+        #pull-refresh-indicator i{font-size:15px;transform:rotate(0deg);will-change:transform}
+        #pull-refresh-indicator.refreshing i{animation:pullRefreshSpin .68s linear infinite}
         @keyframes pullRefreshSpin{to{transform:rotate(360deg)}}
     </style>
     <link rel="manifest" href="./manifest.webmanifest">
@@ -116,6 +117,10 @@
                         <label class="block text-indigo-100 font-semibold mb-1">비밀번호</label>
                         <input id="login-pw" type="password" placeholder="비밀번호" class="w-full bg-white/95 border border-transparent rounded-xl px-3 py-2.5 font-bold focus:outline-none">
                     </div>
+                    <label class="flex items-center gap-2 text-indigo-50 font-semibold select-none cursor-pointer">
+                        <input id="login-remember" type="checkbox" class="w-4 h-4 accent-indigo-600" checked>
+                        <span>로그인 저장</span>
+                    </label>
                     <button onclick="handleLogin()" class="w-full py-3.5 bg-white text-indigo-600 rounded-xl font-bold text-sm shadow-lg hover:bg-indigo-50 transition mt-2">
                         로그인 하기
                     </button>
@@ -832,29 +837,61 @@
 
         async function syncOrgToSupabase(org) {
             const sb = requireSupabase();
-            if (!sb) return;
+            if (!sb) return false;
+
+            const payload = {
+                code: org.code,
+                name: org.name,
+                image_url: org.imageUrl || '',
+                reasons: org.reasons || [],
+                departments: getDepartments(org),
+                dashboard_reset_at: org.dashboardResetAt || null,
+                members: org.members || []
+            };
 
             try {
-                const { error } = await sb.from('organizations').upsert({
-                    code: org.code,
-                    name: org.name,
-                    image_url: org.imageUrl || '',
-                    reasons: org.reasons || [],
-                    departments: getDepartments(org),
-                    dashboard_reset_at: org.dashboardResetAt || null,
-                    members: org.members || []
-                }, { onConflict: 'code' });
+                // 기존 조직은 UPDATE로 저장합니다.
+                // upsert가 RLS의 INSERT 정책에 걸려 기존 조직 수정까지 실패하는 경우를 막습니다.
+                const { data: existing, error: findError } = await sb
+                    .from('organizations')
+                    .select('code')
+                    .eq('code', org.code)
+                    .maybeSingle();
 
-                if (error) throw error;
+                if (findError) throw findError;
+
+                if (existing) {
+                    const { data, error } = await sb
+                        .from('organizations')
+                        .update(payload)
+                        .eq('code', org.code)
+                        .select('code,members,departments')
+                        .maybeSingle();
+
+                    if (error) throw error;
+                    if (!data) throw new Error('조직 수정 권한이 없거나 저장된 행을 확인할 수 없습니다.');
+                } else {
+                    const { data, error } = await sb
+                        .from('organizations')
+                        .insert(payload)
+                        .select('code')
+                        .single();
+
+                    if (error) throw error;
+                    if (!data) throw new Error('조직 생성 결과를 확인할 수 없습니다.');
+                }
+
+                return true;
             } catch (e) {
                 console.error('조직 저장 실패:', e);
-                showAlert('조직 정보를 서버에 저장하지 못했습니다.');
+                showAlert('조직 정보를 서버에 저장하지 못했습니다. 다시 시도해주세요.');
+                return false;
             }
         }
 
         async function syncSubColToSupabase(dataType, orgCode, items) {
             const sb = requireSupabase();
-            if (!sb) return;
+            if (!sb) return false;
 
             try {
                 const { error } = await sb.from('org_data').upsert({
@@ -864,9 +901,11 @@
                 }, { onConflict: 'org_code,data_type' });
 
                 if (error) throw error;
+                return true;
             } catch (e) {
                 console.error(`${dataType} 저장 실패:`, e);
                 showAlert('변경 내용을 서버에 저장하지 못했습니다.');
+                return false;
             }
         }
 
@@ -885,6 +924,13 @@
             } catch (e) {
                 console.error('Supabase 초기 로딩 실패:', e);
             }
+
+            const savedLoginName=safeStorage.getItem('sc_saved_login_name')||'';
+            const rememberLogin=safeStorage.getItem('sc_keep_login');
+            const loginNameEl=document.getElementById('login-name');
+            const loginRememberEl=document.getElementById('login-remember');
+            if(loginNameEl&&savedLoginName) loginNameEl.value=savedLoginName;
+            if(loginRememberEl) loginRememberEl.checked=rememberLogin!=='0';
 
             const numSelSignup = document.getElementById('signup-number');
             const numSelDisc = document.getElementById('target-num-sel');
@@ -970,8 +1016,14 @@
                 return;
             }
 
+            const remember = document.getElementById('login-remember')?.checked !== false;
+            safeStorage.setItem('sc_keep_login', remember ? '1' : '0');
+            if (remember) safeStorage.setItem('sc_saved_login_name', name);
+            else safeStorage.removeItem('sc_saved_login_name');
+
             await loadAllFromSupabase();
             checkOrgMembership();
+            setTimeout(()=>ensurePushSubscriptionSilently(), 500);
         }
 
         async function handleSignup() {
@@ -1168,6 +1220,7 @@
             populateDisciplineReasonsDropdown();
             syncMyMemberMetadata();
             switchTab('home');
+            setTimeout(()=>ensurePushSubscriptionSilently(), 700);
         }
 
         function compressImageFile(file,maxSide=1600,quality=.84){
@@ -1455,6 +1508,7 @@
                             <div class="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl"><span class="font-bold">회의 투표 알림</span><label class="switch"><input id="poll-push-enabled" type="checkbox" onchange="savePushSettings()"><span class="switch-slider"></span></label></div>
                             <div class="max-w-[165px]"><label class="block text-[11px] font-semibold text-slate-600 mb-1">전날 알림 시간</label><input id="guide-reminder-time" type="time" value="20:00" onchange="savePushSettings()" class="w-[132px] max-w-full bg-slate-50 border border-slate-200 px-2 py-1 rounded-lg font-bold text-xs"></div>
                             <button onclick="requestGuideNotificationPermission()" class="w-full py-2.5 bg-indigo-50 text-indigo-600 rounded-xl font-bold">휴대폰 알림 권한 허용</button>
+                            <button onclick="testPushNotification()" class="w-full py-2.5 bg-emerald-50 text-emerald-700 rounded-xl font-bold">내 기기로 테스트 알림 보내기</button>
                             <p class="text-[10px] text-slate-400">공지·회의·지도 알림은 Web Push를 사용합니다. iPhone/iPad에서는 홈 화면에 추가한 앱으로 열고 알림 권한을 허용해야 합니다.</p>
                         </div>
 
@@ -2197,12 +2251,43 @@
             dbCache.swaps[dbCache.currentOrgCode]=list.filter(x=>x.id!==id);await syncSubColToFirestore('swaps',dbCache.currentOrgCode,dbCache.swaps[dbCache.currentOrgCode]);renderSwapList();showAlert('대타 요청이 삭제되었습니다.');
         }
         async function acceptSwap(id){
-            const list=dbCache.swaps[dbCache.currentOrgCode]||[],s=list.find(x=>x.id===id);if(!s||s.status!=='대기중')return;if(s.user===dbCache.currentUser.name)return showAlert('본인의 요청은 수락할 수 없습니다.');
-            const my=getMyUpcomingDutyChoices(dbCache.currentUser.name)[0];if(!my)return showAlert('맞교환하려면 본인에게 앞으로 배정된 지도 일정이 있어야 합니다.');
-            s.acceptedBy=dbCache.currentUser.name;s.status='완료';s.acceptedAt=new Date().toISOString();s.acceptedDate=my.date;s.acceptedDutyType=my.dutyType;s.acceptedTime=my.time;
-            await syncSubColToFirestore('swaps',dbCache.currentOrgCode,list);renderSwapList();updateHomeDashboardData();showAlert(`${s.user}님의 ${s.date} 일정과 내 ${my.date} 일정을 맞교환했습니다.`);
-        }
+            if(refreshInFlight)return showAlert('동기화 중입니다. 잠시 후 다시 눌러주세요.');
 
+            // 다른 사람이 먼저 수락했는지 서버 최신 상태부터 확인합니다.
+            await loadAllFromSupabase();
+
+            const list=dbCache.swaps[dbCache.currentOrgCode]||[];
+            const s=list.find(x=>String(x.id)===String(id));
+            if(!s)return showAlert('대타 요청을 찾지 못했습니다.');
+            if(s.status!=='대기중')return showAlert('이미 다른 사람이 수락했거나 종료된 요청입니다.');
+            if(s.user===dbCache.currentUser.name)return showAlert('본인의 요청은 수락할 수 없습니다.');
+
+            const requesterDuty=getEffectiveDutyForDate(s.user,s.date)
+                .find(d=>(!s.dutyType||d.dutyType===s.dutyType)&&(!s.time||d.time===s.time));
+            if(!requesterDuty)return showAlert('요청자의 해당 일정이 이미 변경되어 스왑할 수 없습니다.');
+
+            const my=getMyUpcomingDutyChoices(dbCache.currentUser.name)[0];
+            if(!my)return showAlert('맞교환하려면 본인에게 앞으로 배정된 지도 일정이 있어야 합니다.');
+
+            if(!confirm(`${s.user}님의 ${s.date} 일정과 내 ${my.date} 일정을 즉시 맞교환할까요?`))return;
+
+            s.acceptedBy=dbCache.currentUser.name;
+            s.status='완료';
+            s.acceptedAt=new Date().toISOString();
+            s.acceptedDate=my.date;
+            s.acceptedDutyType=my.dutyType;
+            s.acceptedTime=my.time;
+            s.requestDutyType=requesterDuty.dutyType;
+            s.requestTime=requesterDuty.time;
+
+            const ok=await syncSubColToFirestore('swaps',dbCache.currentOrgCode,list);
+            // 기존 sync 함수는 실패 시 알림을 띄우므로 이후 최신 데이터를 다시 읽습니다.
+            await refreshAppData(false,true);
+
+            if(currentTab==='duties')renderSwapList();
+            updateHomeDashboardData();
+            showAlert(`${s.user}님의 ${s.date} 일정과 내 ${my.date} 일정이 즉시 맞교환되었습니다.`);
+        }
 
 
         const DEFAULT_DEPARTMENT_NAMES=['총무부','문화체육부','문서제작부','기획부','홍보부'];
@@ -2278,23 +2363,64 @@
         async function deleteDepartment(id){const org=currentOrg(),d=getDepartments(org).find(x=>x.id===id);if(!d)return;if(!confirm(`${d.name}을(를) 삭제할까요? 해당 부서원은 미배정 상태가 됩니다.`))return;org.departments=org.departments.filter(x=>x.id!==id);(org.members||[]).forEach(m=>{if(m.departmentId===id){delete m.departmentId;delete m.departmentRole;}});await syncOrgToFirestore(org);renderDepartmentAdmin();showAlert('부서를 삭제했습니다.');}
         async function saveMemberDepartment(name){
             if(!currentUserIsAdmin())return showAlert('부서 배치와 부장 임명은 관리자만 가능합니다.');
-            const org=currentOrg(),m=org?.members?.find(x=>x.name===name);if(!org||!m)return;
-            const did=document.getElementById(`member-dept-${safeDomId(name)}`)?.value||'';
-            const requested=document.getElementById(`member-head-${safeDomId(name)}`)?.value||'부원';
+            const org=currentOrg(),m=org?.members?.find(x=>x.name===name);
+            if(!org||!m)return showAlert('조직원 정보를 찾지 못했습니다.');
+
+            const deptEl=document.getElementById(`member-dept-${safeDomId(name)}`);
+            const headEl=document.getElementById(`member-head-${safeDomId(name)}`);
+            const did=deptEl?.value||'';
+            const requested=headEl?.value||'부원';
+            const before=JSON.parse(JSON.stringify(org.members||[]));
+
             if(!did){
-                delete m.departmentId;delete m.departmentRole;
-                await syncOrgToFirestore(org);renderDepartmentAdmin();return showAlert('부서 미배정으로 저장했습니다.');
+                delete m.departmentId;
+                delete m.departmentRole;
+            }else{
+                if(!departmentById(did))return showAlert('선택한 부서를 찾지 못했습니다.');
+
+                if(requested==='부장'){
+                    const exists=(org.members||[]).find(
+                        x=>x.name!==name&&x.departmentId===did&&x.departmentRole==='부장'
+                    );
+                    if(exists)return showAlert(`${departmentById(did)?.name||'이 부서'}의 부장은 이미 ${exists.name} 님입니다.`);
+                }
+
+                const moved=!!m.departmentId&&m.departmentId!==did;
+                m.departmentId=did;
+
+                if(requested==='부장'){
+                    m.departmentRole='부장';
+                }else if(moved || !['차장','부원'].includes(m.departmentRole)){
+                    m.departmentRole='부원';
+                }
             }
-            if(requested==='부장'){
-                const exists=(org.members||[]).find(x=>x.name!==name&&x.departmentId===did&&x.departmentRole==='부장');
-                if(exists)return showAlert(`${departmentById(did)?.name||'이 부서'}의 부장은 이미 ${exists.name} 님입니다.`);
+
+            const ok=await syncOrgToFirestore(org);
+            if(!ok){
+                org.members=before;
+                renderDepartmentAdmin();
+                return;
             }
-            const moved=m.departmentId&&m.departmentId!==did;
-            m.departmentId=did;
-            if(requested==='부장')m.departmentRole='부장';
-            else if(moved||m.departmentRole!=='차장')m.departmentRole='부원';
-            await syncOrgToFirestore(org);renderDepartmentAdmin();
-            showAlert(`${name} 님의 부서 배정을 저장했습니다.`);
+
+            // 서버에서 다시 읽어 실제 저장 여부까지 확인합니다.
+            await loadAllFromSupabase();
+            const saved=currentOrg()?.members?.find(x=>x.name===name);
+            const expectedRole=did?(requested==='부장'?'부장':(saved?.departmentRole==='차장'?'차장':'부원')):undefined;
+
+            if(did && saved?.departmentId!==did){
+                renderDepartmentAdmin();
+                return showAlert('부서 배정이 서버에 반영되지 않았습니다. 다시 시도해주세요.');
+            }
+            if(!did && saved?.departmentId){
+                renderDepartmentAdmin();
+                return showAlert('부서 미배정 처리가 서버에 반영되지 않았습니다.');
+            }
+
+            renderDepartmentAdmin();
+            if(currentTab==='departments')renderDepartmentHub();
+            showAlert(did
+                ? `${name} 님을 ${departmentDisplayName(did)} ${expectedRole||'부원'}으로 저장했습니다.`
+                : `${name} 님을 부서 미배정으로 저장했습니다.`);
         }
 
         async function appointDeputy(departmentId){
@@ -2308,7 +2434,10 @@
                 if(target.departmentRole==='부장')return showAlert('부장은 차장으로 지정할 수 없습니다.');
                 target.departmentRole='차장';
             }
-            await syncOrgToFirestore(org);renderDepartmentHub();
+            const ok=await syncOrgToFirestore(org);
+            if(!ok)return;
+            await loadAllFromSupabase();
+            renderDepartmentHub();
             showAlert(name?`${name} 님을 차장으로 임명했습니다.`:'차장 지정을 해제했습니다.');
         }
 
@@ -2319,7 +2448,32 @@
         function openNewMeetingModal(){meetingComposerContext=null;editingMeetingId=null;document.getElementById('meeting-title').value='';document.getElementById('meeting-details').value='';document.getElementById('meeting-time').value='';const h=document.getElementById('meeting-modal-heading');if(h)h.textContent='회의 소집 공지 등록';const hint=document.getElementById('meeting-target-hint');if(hint)hint.textContent='체크된 회원만 푸시 알림과 참석/불참 응답 권한을 받습니다. 모든 인원을 선택하면 전인원 소집으로 표시됩니다.';renderMeetingTargetMembers();openModal('meeting-modal');}
         function openMeetingForEdit(id){const m=(dbCache.meetings[dbCache.currentOrgCode]||[]).find(x=>x.id===id);if(!m)return;meetingComposerContext=m.scope==='department'?{departmentId:m.departmentId,departmentName:m.departmentName,targets:m.targets||[]}:null;editingMeetingId=id;document.getElementById('meeting-title').value=m.title;document.getElementById('meeting-details').value=m.details||'';document.getElementById('meeting-time').value=m.time;const sel=document.getElementById('meeting-loc-select');if(['학생회실','컨퍼런스홀'].includes(m.loc)){sel.value=m.loc;toggleMeetingCustomLoc(m.loc)}else{sel.value='기타';toggleMeetingCustomLoc('기타');document.getElementById('meeting-custom-loc').value=m.loc}const h=document.getElementById('meeting-modal-heading');if(h)h.textContent=m.scope==='department'?`${m.departmentName||departmentDisplayName(m.departmentId)} 회의 수정`:'회의 소집 수정';renderMeetingTargetMembers(m.targets||null,meetingComposerContext?.targets||null,!!meetingComposerContext);openModal('meeting-modal');}
         function meetingAudienceLabel(m){const org=currentOrg(),targets=m.targets||[];if(m.scope==='department')return m.departmentName||departmentDisplayName(m.departmentId);const all=(org?.members||[]).map(x=>x.name);return targets.length===all.length&&all.every(n=>targets.includes(n))?'전인원 소집':targets.join(', ');}
-        async function sendCouncilPush(kind,title,body,targetNames=null,departmentId=null){try{const sb=requireSupabase();if(!sb)return false;const {data,error}=await sb.functions.invoke('send-council-push',{body:{orgCode:dbCache.currentOrgCode,kind,title,body,targetNames,departmentId}});if(error){console.error('학생회 푸시 함수 호출 실패:',error);showAlert('내용은 저장됐지만 푸시 발송에 실패했습니다.');return false;}console.log('학생회 푸시 결과:',data);return true;}catch(e){console.error('학생회 푸시 실패:',e);showAlert('내용은 저장됐지만 푸시 발송에 실패했습니다.');return false;}}
+        async function sendCouncilPush(kind,title,body,targetNames=null,departmentId=null){
+            try{
+                const sb=requireSupabase();if(!sb)return false;
+                const {data:{session}}=await sb.auth.getSession();
+                if(!session?.access_token){
+                    console.error('학생회 푸시: 로그인 토큰 없음');
+                    return false;
+                }
+                const {data,error}=await sb.functions.invoke('send-council-push',{
+                    headers:{Authorization:`Bearer ${session.access_token}`},
+                    body:{orgCode:dbCache.currentOrgCode,kind,title,body,targetNames,departmentId}
+                });
+                if(error){
+                    console.error('학생회 푸시 함수 호출 실패:',error);
+                    showAlert('내용은 저장됐지만 푸시 발송에 실패했습니다. 설정의 테스트 알림을 확인해주세요.');
+                    return false;
+                }
+                console.log('학생회 푸시 결과:',data);
+                if(data?.failed>0)console.warn('푸시 일부 실패:',data);
+                return true;
+            }catch(e){
+                console.error('학생회 푸시 실패:',e);
+                showAlert('내용은 저장됐지만 푸시 발송에 실패했습니다.');
+                return false;
+            }
+        }
         async function submitMeeting(){const title=document.getElementById('meeting-title').value.trim(),details=document.getElementById('meeting-details').value.trim();let loc=document.getElementById('meeting-loc-select').value;if(loc==='기타')loc=document.getElementById('meeting-custom-loc').value.trim()||'기타 장소';const time=document.getElementById('meeting-time').value,targets=meetingComposerContext?.targets||selectedMeetingTargets();if(!title||!time)return showAlert('제목과 회의 일시를 입력해주세요.');if(!targets.length)return showAlert('소집 회원을 선택해주세요.');const list=(dbCache.meetings[dbCache.currentOrgCode]||=[]),extra=meetingComposerContext?{scope:'department',departmentId:meetingComposerContext.departmentId,departmentName:meetingComposerContext.departmentName,author:dbCache.currentUser.name}:{scope:'global'};if(editingMeetingId){const m=list.find(x=>x.id===editingMeetingId);Object.assign(m,{title,details,loc,time,targets,...extra});await sendCouncilPush('meeting',`회의 수정: ${title}`,`${time.replace('T',' ')} · ${loc}`,targets,meetingComposerContext?.departmentId||null);editingMeetingId=null}else{list.unshift({id:Date.now(),title,details,loc,time,targets,rsvps:{},rsvpReasons:{},...extra});await sendCouncilPush('meeting',`${meetingComposerContext?meetingComposerContext.departmentName+' ':''}회의 소집: ${title}`,`${time.replace('T',' ')} · ${loc}`,targets,meetingComposerContext?.departmentId||null)}await syncSubColToFirestore('meetings',dbCache.currentOrgCode,list);closeModal('meeting-modal');const wasDept=!!meetingComposerContext;meetingComposerContext=null;if(wasDept&&currentTab==='departments')renderDepartmentHub();else if(currentTab==='meetings')renderMeetingList();showAlert('회의가 저장되었습니다.');}
         async function deleteMeeting(id){const item=(dbCache.meetings[dbCache.currentOrgCode]||[]).find(x=>x.id===id);if(!item)return;if(item.scope==='department'&&!canManageDepartmentContent(item.departmentId))return showAlert('삭제 권한이 없습니다.');if(item.scope!=='department'&&!currentUserIsAdmin())return showAlert('관리자만 삭제할 수 있습니다.');if(!confirm('이 회의를 삭제하시겠습니까?'))return;dbCache.meetings[dbCache.currentOrgCode]=(dbCache.meetings[dbCache.currentOrgCode]||[]).filter(x=>x.id!==id);await syncSubColToFirestore('meetings',dbCache.currentOrgCode,dbCache.meetings[dbCache.currentOrgCode]);if(currentTab==='departments')renderDepartmentHub();else renderMeetingList();}
         function handleRSVP(mid,status){const list=dbCache.meetings[dbCache.currentOrgCode]||[],m=list.find(x=>x.id===mid);if(!m)return;if(Array.isArray(m.targets)&&!m.targets.includes(dbCache.currentUser.name))return showAlert('소집 대상자가 아닙니다.');m.rsvps||={};m.rsvpReasons||={};if(status==='불참'){const reason=prompt('불참 사유를 입력해주세요.');if(reason===null)return;if(!reason.trim())return showAlert('사유를 입력해주세요.');m.rsvpReasons[dbCache.currentUser.name]=reason.trim()}else delete m.rsvpReasons[dbCache.currentUser.name];m.rsvps[dbCache.currentUser.name]=status;syncSubColToFirestore('meetings',dbCache.currentOrgCode,list);if(currentTab==='departments')renderDepartmentHub();else renderMeetingList();}
@@ -2603,62 +2757,76 @@
             area.dataset.pullReady='1';
 
             let startY=0;
-            let currentY=0;
+            let lastY=0;
             let pulling=false;
             let busy=false;
-            const threshold=72;
+
+            const threshold=()=>Math.max(120,window.innerHeight*0.30);
 
             const resetIndicator=()=>{
-                indicator.classList.remove('show','refreshing');
-                if(icon) icon.style.transform='rotate(0deg)';
+                indicator.classList.remove('show','ready','refreshing');
+                indicator.style.opacity='';
+                indicator.style.transform='';
+                if(icon)icon.style.transform='rotate(0deg)';
+            };
+
+            const updateIndicator=(dy)=>{
+                const need=threshold();
+                const progress=Math.max(0,Math.min(1,dy/need));
+                indicator.classList.toggle('show',dy>6);
+                indicator.classList.toggle('ready',progress>=1);
+                indicator.style.opacity=String(Math.max(.18,progress));
+                const scale=.78+(.22*progress);
+                indicator.style.transform=`translate(-50%,-50%) scale(${scale})`;
+                if(icon){
+                    // 화면을 더 당길수록 화살표가 계속 회전합니다.
+                    const degrees=progress*540 + Math.max(0,dy-need)*1.2;
+                    icon.style.transform=`rotate(${degrees}deg)`;
+                }
             };
 
             area.addEventListener('touchstart',(e)=>{
-                if(busy||refreshInFlight) return;
-                if(area.scrollTop<=2&&e.touches?.length===1){
+                if(busy||refreshInFlight||e.touches?.length!==1)return;
+                if(area.scrollTop<=1){
                     startY=e.touches[0].clientY;
-                    currentY=startY;
+                    lastY=startY;
                     pulling=true;
                 }
             },{passive:true});
 
             area.addEventListener('touchmove',(e)=>{
-                if(!pulling||busy||!e.touches?.length) return;
-                currentY=e.touches[0].clientY;
-                const dy=currentY-startY;
+                if(!pulling||busy||e.touches?.length!==1)return;
+                lastY=e.touches[0].clientY;
+                const dy=lastY-startY;
 
-                if(dy<=0||area.scrollTop>2){
+                if(dy<=0||area.scrollTop>1){
+                    pulling=false;
                     resetIndicator();
                     return;
                 }
-
-                if(dy>8){
-                    indicator.classList.add('show');
-                    if(icon){
-                        const degrees=Math.min(300,Math.max(0,dy*3.2));
-                        icon.style.transform=`rotate(${degrees}deg)`;
-                    }
-                }
+                updateIndicator(dy);
             },{passive:true});
 
             area.addEventListener('touchend',async(e)=>{
-                if(!pulling||busy) return;
+                if(!pulling||busy)return;
                 pulling=false;
 
-                const endY=e.changedTouches?.[0]?.clientY??currentY;
+                const endY=e.changedTouches?.[0]?.clientY??lastY;
                 const dy=endY-startY;
 
-                if(area.scrollTop<=2&&dy>=threshold){
+                if(area.scrollTop<=1&&dy>=threshold()){
                     busy=true;
-                    indicator.classList.add('show','refreshing');
-                    if(icon) icon.style.transform='';
+                    indicator.classList.add('show','ready','refreshing');
+                    indicator.style.opacity='1';
+                    if(icon)icon.style.transform='';
 
-                    await refreshAppData(false,false);
+                    const ok=await refreshAppData(false,false);
 
                     setTimeout(()=>{
                         resetIndicator();
                         busy=false;
-                    },420);
+                        if(ok)showAlert('최신 데이터로 동기화했습니다.');
+                    },380);
                 }else{
                     resetIndicator();
                 }
@@ -2668,6 +2836,9 @@
                 pulling=false;
                 resetIndicator();
             },{passive:true});
+
+            // iPad/Safari에서 화면 회전 후에도 30% 기준이 현재 화면 높이에 맞게 자동 계산됩니다.
+            window.addEventListener('orientationchange',resetIndicator);
         }
 
         let autoSyncChannel=null;
@@ -2752,7 +2923,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=11',{scope:'./',updateViaCache:'none'});
         }
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
@@ -2785,6 +2956,57 @@
             if(error) throw error;
             return true;
         }
+        async function ensurePushSubscriptionSilently(){
+            try{
+                if(!dbCache.currentUser||!dbCache.currentOrgCode)return false;
+                if(!('Notification' in window)||Notification.permission!=='granted')return false;
+                const s=getGuideReminderSettings();
+                return await syncPushSubscription(
+                    !!s.enabled,
+                    s.time||'20:00',
+                    s.noticeEnabled!==false,
+                    s.meetingEnabled!==false,
+                    s.pollEnabled!==false
+                );
+            }catch(e){
+                console.warn('푸시 구독 자동 복구 실패:',e);
+                return false;
+            }
+        }
+
+        async function testPushNotification(){
+            try{
+                if(!('Notification' in window))return showAlert('이 브라우저는 알림 기능을 지원하지 않습니다.');
+                if(Notification.permission!=='granted'){
+                    const ok=await requestGuideNotificationPermission(false);
+                    if(!ok)return showAlert('먼저 알림 권한을 허용해주세요.');
+                }else{
+                    await ensurePushSubscriptionSilently();
+                }
+
+                const sb=requireSupabase();if(!sb)return;
+                const {data:{session}}=await sb.auth.getSession();
+                if(!session?.access_token)return showAlert('로그인 정보를 다시 확인해주세요.');
+
+                const {data,error}=await sb.functions.invoke('send-council-push',{
+                    headers:{Authorization:`Bearer ${session.access_token}`},
+                    body:{
+                        orgCode:dbCache.currentOrgCode,
+                        kind:'test',
+                        title:'학생회 테스트 알림',
+                        body:'알림 연결이 정상적으로 작동하고 있습니다.'
+                    }
+                });
+
+                if(error)throw error;
+                if((data?.sent||0)>0)showAlert('테스트 알림을 보냈습니다. 잠시 후 기기 알림을 확인해주세요.');
+                else showAlert('등록된 푸시 기기를 찾지 못했습니다. 알림 권한 허용 버튼을 다시 눌러주세요.');
+            }catch(e){
+                console.error('테스트 푸시 실패:',e);
+                showAlert('테스트 알림 실패: '+(e?.message||e));
+            }
+        }
+
         async function loadGuideReminderSettings(){
             const s=getGuideReminderSettings(),en=document.getElementById('guide-reminder-enabled'),tm=document.getElementById('guide-reminder-time'),ne=document.getElementById('notice-push-enabled'),me=document.getElementById('meeting-push-enabled'),pe=document.getElementById('poll-push-enabled');
             if(en)en.checked=!!s.enabled;if(tm)tm.value=s.time||'20:00';if(ne)ne.checked=s.noticeEnabled!==false;if(me)me.checked=s.meetingEnabled!==false;if(pe)pe.checked=s.pollEnabled!==false;
@@ -2814,7 +3036,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=11',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
