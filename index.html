@@ -1219,7 +1219,17 @@
 
             populateDisciplineReasonsDropdown();
             syncMyMemberMetadata();
-            switchTab('home');
+
+            let reopenTab='home';
+            try{
+                const savedTab=sessionStorage.getItem('sc_reopen_tab_after_refresh');
+                if(['announcements','discipline','home','meetings','departments'].includes(savedTab)){
+                    reopenTab=savedTab;
+                }
+                sessionStorage.removeItem('sc_reopen_tab_after_refresh');
+            }catch(e){}
+
+            switchTab(reopenTab);
             setTimeout(()=>ensurePushSubscriptionSilently(), 700);
         }
 
@@ -1262,61 +1272,33 @@
 
         let bottomNavRefreshBusy=false;
 
-        async function handleBottomNavTap(tab){
-            // 선도 기록/일정/매뉴얼 화면도 하단에서는 '선도' 탭으로 취급
+        function handleBottomNavTap(tab){
+            // 선도 내부 화면도 하단에서는 '선도' 탭으로 취급
             const activeBottomTab=['records','duties','manual'].includes(currentTab)
                 ? 'discipline'
                 : currentTab;
 
-            // 현재 보고 있는 하단 메뉴를 한 번 더 누르면 서버 최신 데이터로 동기화
+            // 현재 보고 있는 하단 메뉴를 다시 누르면
+            // 복잡한 부분 동기화 대신 앱 자체를 새로 불러옵니다.
+            // iPhone/iPad Safari에서도 가장 안정적으로 최신 Supabase 데이터를 다시 읽습니다.
             if(activeBottomTab===tab){
-                if(bottomNavRefreshBusy||refreshInFlight)return;
-
+                if(bottomNavRefreshBusy)return;
                 bottomNavRefreshBusy=true;
 
-                // 누른 메뉴 아이콘을 잠깐 회전시켜 새로고침 중임을 표시
+                try{
+                    sessionStorage.setItem('sc_reopen_tab_after_refresh',tab);
+                }catch(e){}
+
                 const btn=document.querySelector(`.tab-btn[data-tab="${tab}"]`);
                 const icon=btn?.querySelector('i');
-                const oldAnimation=icon?.style.animation||'';
+                if(icon) icon.style.animation='pullRefreshSpin .65s linear infinite';
 
-                if(icon){
-                    icon.style.animation='pullRefreshSpin .65s linear infinite';
-                }
-
-                try{
-                    const ok=await refreshAppData(false,true);
-
-                    // 현재 화면을 서버에서 다시 받은 데이터로 즉시 다시 그림
-                    if(tab==='home'){
-                        switchTab('home');
-                    }else if(tab==='announcements'){
-                        switchTab('announcements');
-                    }else if(tab==='meetings'){
-                        switchTab('meetings');
-                    }else if(tab==='departments'){
-                        switchTab('departments');
-                    }else if(tab==='discipline'){
-                        // 선도 내부 화면에 있다면 그 화면을 유지
-                        if(['records','duties','manual'].includes(currentTab)){
-                            switchTab(currentTab);
-                        }else{
-                            switchTab('discipline');
-                        }
-                    }
-
-                    if(ok)showAlert('최신 데이터로 새로고침했습니다.');
-                    else showAlert('새로고침에 실패했습니다.');
-                }catch(e){
-                    console.error('하단 메뉴 새로고침 실패:',e);
-                    showAlert('새로고침에 실패했습니다.');
-                }finally{
-                    if(icon)icon.style.animation=oldAnimation;
-                    bottomNavRefreshBusy=false;
-                }
+                // 캐시된 화면이 아니라 실제 페이지 로드를 다시 실행
+                window.location.reload();
                 return;
             }
 
-            // 다른 메뉴를 누른 경우에는 기존처럼 화면 이동
+            // 다른 메뉴는 기존처럼 바로 이동
             switchTab(tab);
         }
 
@@ -1538,11 +1520,6 @@
                         </div>
 
                         ${isAdmin ? `
-                        <div class="bg-violet-50 p-4 rounded-2xl border border-violet-100 shadow-sm space-y-2">
-                            <h3 class="font-bold text-violet-700"><i class="fa-solid fa-people-group mr-1"></i> 부서 관리</h3>
-                            <p class="text-slate-600">부서 추가·이름 수정·삭제와 부장/차장/부원 배정을 관리합니다.</p>
-                            <button onclick="openDepartmentAdmin()" class="w-full py-2.5 bg-violet-600 text-white rounded-xl font-bold">부서 관리 열기</button>
-                        </div>
                         <div class="bg-indigo-50 p-4 rounded-2xl border border-indigo-100 shadow-sm space-y-2">
                             <h3 class="font-bold text-indigo-700"><i class="fa-solid fa-users mr-1"></i> 학생회 전체 인원</h3>
                             <p class="text-slate-600">이름(직책), 학년·반·번호, 현재 지도 요일을 확인하고 조직원을 추방할 수 있습니다.</p>
@@ -2378,6 +2355,16 @@
             const notices=(dbCache.notices[dbCache.currentOrgCode]||[]).filter(x=>x.scope==='department'&&x.departmentId===key);
             root.innerHTML=`
                 <div><h2 class="text-base font-bold text-slate-800">부서</h2><p class="text-[11px] text-slate-500">같은 부서 구성원끼리 회의 소집과 공지를 공유합니다.</p></div>
+                ${admin?`
+                <div class="bg-violet-50 p-4 rounded-2xl border border-violet-100 shadow-sm space-y-2">
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <h3 class="font-bold text-violet-700"><i class="fa-solid fa-people-group mr-1"></i> 부서 관리</h3>
+                            <p class="text-[11px] text-slate-600 mt-1">부서 추가·이름 수정·삭제와 부장/차장/부원 배정을 관리합니다.</p>
+                        </div>
+                        <button onclick="openDepartmentAdmin()" class="shrink-0 px-3 py-2 bg-violet-600 text-white rounded-xl text-xs font-bold">관리</button>
+                    </div>
+                </div>`:''}
                 <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1">${keys.map(k=>`<button onclick="activeDepartmentKey=${JSON.stringify(k)};renderDepartmentHub()" class="whitespace-nowrap px-3 py-2 rounded-xl text-xs font-bold ${k===key?'bg-indigo-600 text-white':'bg-white border text-slate-600'}">${departmentDisplayName(k)}</button>`).join('')}</div>
                 <div class="bg-gradient-to-r from-indigo-500 to-violet-600 text-white rounded-2xl p-4">
                     <div class="flex justify-between items-start gap-2"><div><div class="font-bold text-base">${departmentDisplayName(key)}</div><div class="text-[11px] text-indigo-100 mt-1">${members.map(m=>`${m.name}(${key==='leaders'?(isGlobalAdminMember(m)?m.role:'부장'):`${departmentDisplayName(key)} ${m.departmentRole||'부원'}`})`).join(' · ')||'구성원 없음'}</div></div>${canPost?`<div class="flex gap-1"><button onclick="openDepartmentNotice(${JSON.stringify(key)})" class="px-2.5 py-1.5 bg-white/20 rounded-lg font-bold text-[11px]">공지</button><button onclick="openDepartmentMeeting(${JSON.stringify(key)})" class="px-2.5 py-1.5 bg-white/20 rounded-lg font-bold text-[11px]">회의 소집</button></div>`:''}</div>
@@ -3002,7 +2989,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=13',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=15',{scope:'./',updateViaCache:'none'});
         }
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
@@ -3115,7 +3102,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=13',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=15',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
