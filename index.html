@@ -471,8 +471,9 @@
                 <h3 class="text-lg font-bold text-indigo-600 mb-4">지도 출석 기록</h3>
                 <div class="space-y-3 text-xs">
                     <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-3 text-indigo-700 leading-relaxed">오늘 실제로 배정된 지도 일정만 출석할 수 있습니다. 대타 스왑이 완료된 경우에는 오늘 하루의 변경된 담당 일정이 자동 반영됩니다.</div>
-                    <div><label class="block font-bold mb-1">오늘의 지도 일정</label><select id="guide-att-assignment" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl"></select></div>
-                    <button onclick="submitGuideAttendance()" class="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold">지도 출석하기 (1시간 인정)</button>
+                    <div><label class="block font-bold mb-1">오늘의 지도 일정</label><select id="guide-att-assignment" onchange="refreshGuideAttendanceWindow()" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl"></select></div>
+                    <div id="guide-att-window-info" class="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-600"></div>
+                    <button id="guide-att-submit-btn" onclick="submitGuideAttendance()" class="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold disabled:bg-slate-300 disabled:cursor-not-allowed">지도 출석하기 (1시간 인정)</button>
                 </div>
             </div>
         </div>
@@ -1147,6 +1148,7 @@
                         <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
                             <h3 class="text-xs font-bold text-slate-700"><i class="fa-solid fa-calendar-day mr-1.5"></i> 나의 선도 지도 일정</h3>
                             <div id="home-duty-preview" class="text-xs text-slate-500">배정된 선도 지도 일정을 확인하세요.</div>
+                            <div id="home-attendance-alerts" class="space-y-2"></div>
                             <div class="grid grid-cols-2 gap-2 mt-1">
                                 <button onclick="openGuideAttendanceModal()" class="py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs">지도 출석하기</button>
                                 <button onclick="openModal('swap-modal')" class="py-2 bg-slate-100 hover:bg-slate-200 text-indigo-600 rounded-xl font-bold text-xs transition">대타(스왑) 신청</button>
@@ -1855,15 +1857,73 @@
                 return `<div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm text-xs space-y-2">
                     <div class="flex flex-wrap gap-1.5"><span class="px-2 py-1 bg-slate-100 text-slate-700 font-bold rounded-lg">${date}</span><span class="px-2 py-1 bg-indigo-50 text-indigo-600 font-bold rounded-lg">${day}</span><span class="px-2 py-1 bg-amber-50 text-amber-700 font-bold rounded-lg">${type}</span></div>
                     <div class="text-[11px] text-slate-500">같은 날 · 같은 지도 유형 담당자</div>
-                    <div class="flex flex-wrap gap-2">${unique.map(x=>`<span class="bg-slate-50 border px-2 py-1 rounded-lg"><b>${x.memberName}</b> · ${x.time}</span>`).join('')}</div>
+                    <div class="flex flex-wrap gap-2">${unique.map(x=>`<span class="bg-slate-50 border px-2 py-1 rounded-lg inline-flex items-center gap-1.5"><b>${x.memberName}</b> · ${x.time}${currentUserIsAdmin()?`<button onclick="deleteDutySchedule(${x.id})" class="ml-1 text-rose-600 font-bold" title="이 선도 일정 삭제">삭제</button>`:''}</span>`).join('')}</div>
                 </div>`;
             }).join('');
         }
 
+        async function deleteDutySchedule(id){
+            if (!currentUserIsAdmin()) return showAlert('관리자만 선도 일정을 삭제할 수 있습니다.');
+            const list = dbCache.duties[dbCache.currentOrgCode] || [];
+            const target = list.find(d => Number(d.id) === Number(id));
+            if (!target) return showAlert('삭제할 선도 일정을 찾지 못했습니다.');
+            if (!confirm(`${target.day} ${target.dutyType} · ${target.memberName} 일정을 삭제할까요?`)) return;
+            dbCache.duties[dbCache.currentOrgCode] = list.filter(d => Number(d.id) !== Number(id));
+            await syncSubColToFirestore('duties', dbCache.currentOrgCode, dbCache.duties[dbCache.currentOrgCode]);
+            renderDutyScheduleList();
+            showAlert('선도 일정이 삭제되었습니다.');
+        }
+
+        function localDateStr(d=new Date()) {
+            const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+            return `${y}-${m}-${day}`;
+        }
+        function dutyDateTime(dateStr,timeStr){
+            const [y,m,d]=dateStr.split('-').map(Number), [hh,mm]=timeStr.split(':').map(Number);
+            return new Date(y,m-1,d,hh,mm,0,0);
+        }
+        function attendancePhase(dateStr,timeStr,now=new Date()){
+            const scheduled=dutyDateTime(dateStr,timeStr);
+            const diff=(now-scheduled)/60000;
+            if(diff < -5) return {phase:'early',diff,scheduled};
+            if(diff <= 1) return {phase:'present',diff,scheduled};
+            if(diff <= 40) return {phase:'late',diff,scheduled};
+            return {phase:'absent',diff,scheduled};
+        }
+        async function checkAttendanceDeadlines(){
+            const date=localDateStr(), assignments=[];
+            const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
+            if(!org) return;
+            (org.members||[]).forEach(m=>getEffectiveDutyForDate(m.name,date).forEach(d=>assignments.push({...d,user:m.name})));
+            const list=(dbCache.guideAttendance[dbCache.currentOrgCode]||=[]); let changed=false;
+            assignments.forEach(d=>{
+                const exists=list.some(a=>a.user===d.user&&a.date===date&&a.type===d.dutyType&&a.time===d.time);
+                if(!exists && attendancePhase(date,d.time).phase==='absent'){
+                    list.unshift({id:Date.now()+Math.random(),user:d.user,date,type:d.dutyType,time:d.time,status:'결석',createdAt:new Date().toISOString(),dismissedByAdmin:false,auto:true}); changed=true;
+                }
+            });
+            if(changed) await syncSubColToFirestore('guide_attendance',dbCache.currentOrgCode,list);
+        }
+        function attendanceStatusLabel(a){ return a.status || '출석'; }
         function renderGuideAttendanceReport(){
             const el=document.getElementById('guide-attendance-report'); if(!el)return;
             const rows=dbCache.guideAttendance[dbCache.currentOrgCode]||[];
-            el.innerHTML=rows.length?rows.slice(0,50).map(a=>`<div class="bg-white border border-slate-200 rounded-xl p-3 text-xs flex justify-between gap-2"><span><b>${a.user}</b> · ${a.type}${a.time?' · '+a.time:''}</span><span class="text-slate-500">${a.date}</span></div>`).join(''):'<p class="text-xs text-slate-400">아직 지도 출석 기록이 없습니다.</p>';
+            el.innerHTML=rows.length?rows.slice(0,80).map(a=>{
+                const st=attendanceStatusLabel(a), cls=st==='결석'?'text-rose-600':st==='지각'?'text-amber-600':'text-emerald-600';
+                return `<div class="bg-white border border-slate-200 rounded-xl p-3 text-xs flex justify-between gap-2"><span><b>${a.user}</b> · ${a.type}${a.time?' · '+a.time:''}<b class="ml-2 ${cls}">${st}</b></span><span class="text-slate-500">${a.date}</span></div>`;
+            }).join(''):'<p class="text-xs text-slate-400">아직 지도 출석 기록이 없습니다.</p>';
+        }
+        function renderHomeAttendanceAlerts(){
+            const el=document.getElementById('home-attendance-alerts'); if(!el)return;
+            const incidents=(dbCache.guideAttendance[dbCache.currentOrgCode]||[]).filter(a=>(a.status==='지각'||a.status==='결석')&&!a.dismissedByAdmin);
+            el.innerHTML=incidents.length?incidents.slice(0,20).map(a=>`<div class="border ${a.status==='결석'?'border-rose-200 bg-rose-50 text-rose-700':'border-amber-200 bg-amber-50 text-amber-700'} rounded-xl p-3 text-xs"><div class="flex justify-between gap-2"><span><b>${a.user}</b> · ${a.date} ${a.time} ${a.type} · <b>${a.status}</b></span>${currentUserIsAdmin()?`<button onclick="dismissAttendanceAlert(${JSON.stringify(a.id)})" class="font-bold underline">알림 삭제</button>`:''}</div></div>`).join(''):'';
+        }
+        async function dismissAttendanceAlert(id){
+            if(!currentUserIsAdmin()) return showAlert('관리자만 지각·결석 알림을 삭제할 수 있습니다.');
+            const row=(dbCache.guideAttendance[dbCache.currentOrgCode]||[]).find(a=>String(a.id)===String(id));
+            if(!row)return; row.dismissedByAdmin=true;
+            await syncSubColToFirestore('guide_attendance',dbCache.currentOrgCode,dbCache.guideAttendance[dbCache.currentOrgCode]);
+            renderHomeAttendanceAlerts(); showAlert('홈의 지각·결석 알림을 삭제했습니다. 출석 보고 기록은 유지됩니다.');
         }
 
         function submitSwap() {
@@ -1973,32 +2033,52 @@
             return effective;
         }
         function updateHomeDashboardData(){
+            checkAttendanceDeadlines().then(()=>{ renderHomeAttendanceAlerts(); if(currentTab==='duties'&&currentUserIsAdmin()) renderGuideAttendanceReport(); });
             const meets=dbCache.meetings[dbCache.currentOrgCode]||[], att=dbCache.guideAttendance[dbCache.currentOrgCode]||[], notices=dbCache.notices[dbCache.currentOrgCode]||[];
-            const myAtt=att.filter(a=>a.user===dbCache.currentUser.name).length, myMeets=meets.filter(m=>m.rsvps?.[dbCache.currentUser.name]==='참석').length;
+            const myValidAtt=att.filter(a=>a.user===dbCache.currentUser.name&&a.status!=='결석');
+            const myAtt=myValidAtt.length, myMeets=meets.filter(m=>m.rsvps?.[dbCache.currentUser.name]==='참석').length;
             document.getElementById('dash-crack').innerText=`${myAtt}회`; document.getElementById('dash-meeting').innerText=`${myMeets}회`; document.getElementById('dash-time').innerText=`${myAtt}시간`;
             const latest=meets[0]; document.getElementById('home-meeting-preview').innerHTML=latest?`<b>${latest.title}</b> (${latest.loc} / ${latest.time.replace('T',' ')})${latest.details?`<div class="mt-1 text-slate-500 whitespace-pre-line">${latest.details}</div>`:''}`:'추가 일정 없음';
             const np=document.getElementById('home-notice-preview'); if(np) np.innerHTML=notices.length?notices.slice(0,5).map(n=>`<div class="border-t pt-2"><b>${n.title}</b><p class="text-slate-500 whitespace-pre-line">${n.content}</p><span class="text-[10px] text-slate-400">${n.date||''}</span></div>`).join(''):'등록된 공지가 없습니다.';
-            const today=new Date(), rows=[]; for(let i=0;i<14;i++){const d=new Date(today);d.setDate(today.getDate()+i);const ds=d.toISOString().slice(0,10);const eff=getEffectiveDutyForDate(dbCache.currentUser.name,ds);eff.forEach(x=>rows.push({...x,date:ds}));}
+            const today=new Date(), rows=[]; for(let i=0;i<14;i++){const d=new Date(today);d.setDate(today.getDate()+i);const ds=localDateStr(d);const eff=getEffectiveDutyForDate(dbCache.currentUser.name,ds);eff.forEach(x=>rows.push({...x,date:ds}));}
             const dp=document.getElementById('home-duty-preview'); if(dp) dp.innerHTML=rows.length?rows.slice(0,8).map(d=>`<div class="border-t pt-2"><b>${d.date} · ${d.dutyType}</b> (${d.time})${d.originalMemberName!==d.effectiveMemberName?` <span class="text-indigo-600 font-bold">· 스왑 반영</span>`:''}</div>`).join(''):'앞으로 2주간 배정된 지도 일정이 없습니다.';
+            renderHomeAttendanceAlerts();
         }
         function openGuideAttendanceModal(){
-            const today=new Date().toISOString().slice(0,10);
+            const today=localDateStr();
             const assignments=getEffectiveDutyForDate(dbCache.currentUser.name,today);
             const sel=document.getElementById('guide-att-assignment');
             if(!assignments.length) return showAlert('오늘 배정된 지도 일정이 없습니다.');
             sel.innerHTML=assignments.map((d,i)=>`<option value="${i}">${d.dutyType} · ${d.time}${d.originalMemberName!==d.effectiveMemberName?' · 스왑 일정':''}</option>`).join('');
-            sel.dataset.date=today;
-            sel._assignments=assignments;
-            openModal('guide-attendance-modal');
+            sel.dataset.date=today; sel._assignments=assignments;
+            refreshGuideAttendanceWindow(); openModal('guide-attendance-modal');
         }
-        function submitGuideAttendance(){
+        function refreshGuideAttendanceWindow(){
+            const sel=document.getElementById('guide-att-assignment'), info=document.getElementById('guide-att-window-info'), btn=document.getElementById('guide-att-submit-btn');
+            const duty=(sel?._assignments||[])[Number(sel?.value||0)]; if(!duty||!info||!btn)return;
+            const date=sel.dataset.date, phase=attendancePhase(date,duty.time);
+            const scheduled=dutyDateTime(date,duty.time), start=new Date(scheduled-5*60000), normalEnd=new Date(scheduled.getTime()+60000), absentAt=new Date(scheduled.getTime()+40*60000);
+            const hm=d=>`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+            const already=(dbCache.guideAttendance[dbCache.currentOrgCode]||[]).find(a=>a.user===dbCache.currentUser.name&&a.date===date&&a.type===duty.dutyType&&a.time===duty.time);
+            if(already){ info.innerHTML=`이미 <b>${attendanceStatusLabel(already)}</b> 처리된 일정입니다.`; btn.disabled=true; return; }
+            if(phase.phase==='early'){ info.innerHTML=`정상 출석 가능 시간은 <b>${hm(start)}~${hm(normalEnd)}</b>입니다. ${hm(normalEnd)} 이후에는 지각, ${hm(absentAt)} 이후에는 결석 처리됩니다.`; btn.disabled=true; }
+            else if(phase.phase==='present'){ info.innerHTML=`현재 <b class="text-emerald-600">정상 출석 가능</b> 시간입니다. (${hm(start)}~${hm(normalEnd)})`; btn.disabled=false; }
+            else if(phase.phase==='late'){ info.innerHTML=`현재 <b class="text-amber-600">지각 출석</b> 시간입니다. 지금 출석하면 지각으로 관리자에게 보고됩니다. ${hm(absentAt)} 이후에는 결석 처리됩니다.`; btn.disabled=false; }
+            else { info.innerHTML=`출석 마감 ${hm(absentAt)}이 지나 <b class="text-rose-600">결석</b> 처리 대상입니다.`; btn.disabled=true; checkAttendanceDeadlines(); }
+        }
+        async function submitGuideAttendance(){
             const sel=document.getElementById('guide-att-assignment'), date=sel.dataset.date;
             const assignments=sel._assignments||[]; const duty=assignments[Number(sel.value)];
             if(!date||!duty)return showAlert('출석할 지도 일정을 선택해주세요.');
+            const phase=attendancePhase(date,duty.time);
+            if(phase.phase==='early') return showAlert('아직 출석 가능 시간이 아닙니다. 배정시간 5분 전부터 출석할 수 있습니다.');
+            if(phase.phase==='absent'){ await checkAttendanceDeadlines(); refreshGuideAttendanceWindow(); return showAlert('출석 마감 40분이 지나 결석 처리되었습니다.'); }
             const list=(dbCache.guideAttendance[dbCache.currentOrgCode]||=[]);
-            if(list.some(a=>a.user===dbCache.currentUser.name&&a.date===date&&a.type===duty.dutyType&&a.time===duty.time))return showAlert('이 지도 일정은 이미 출석 처리되었습니다.');
-            list.unshift({id:Date.now(),user:dbCache.currentUser.name,date,type:duty.dutyType,time:duty.time,createdAt:new Date().toISOString()});
-            syncSubColToFirestore('guide_attendance',dbCache.currentOrgCode,list);closeModal('guide-attendance-modal');updateHomeDashboardData();showAlert('지도 출석 1회가 기록되어 활동시간 1시간이 반영되었습니다.');
+            if(list.some(a=>a.user===dbCache.currentUser.name&&a.date===date&&a.type===duty.dutyType&&a.time===duty.time))return showAlert('이 지도 일정은 이미 처리되었습니다.');
+            const status=phase.phase==='late'?'지각':'출석';
+            list.unshift({id:Date.now(),user:dbCache.currentUser.name,date,type:duty.dutyType,time:duty.time,status,createdAt:new Date().toISOString(),dismissedByAdmin:false});
+            await syncSubColToFirestore('guide_attendance',dbCache.currentOrgCode,list); closeModal('guide-attendance-modal'); updateHomeDashboardData();
+            showAlert(status==='지각'?'지각 출석으로 기록되었으며 관리자에게 보고됩니다.':'정상 출석으로 기록되어 활동시간 1시간이 반영되었습니다.');
         }
 
         function getManualContent(){const x=dbCache.manuals[dbCache.currentOrgCode]||[];return x[0]?.content||`1. 사복 착용 단속\n- 상의 사복 착용 시 교복 또는 체육복 겉옷 소지 여부를 확인합니다.\n\n2. 슬리퍼 및 신발 규정\n- 슬리퍼, 크록스, 어그 부츠 착용 금지.\n\n3. 명찰 미부착 규정\n- 규정된 명찰 상시 패용 여부 확인.\n\n[당일 지도 체크리스트]\n- 단정한 학생회 복장 착용\n- 지각생 및 규정 위반자 공정하게 기록\n- 위반 사유 확인 후 앱에 입력`;}
