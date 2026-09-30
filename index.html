@@ -232,7 +232,6 @@
                 <div class="flex items-center gap-1.5 flex-shrink-0">
                     <span id="header-user-badge" class="text-[11px] font-bold max-w-[92px] truncate">이름</span>
                     <button onclick="logoutToAuth()" class="bg-indigo-500/80 hover:bg-indigo-700 text-white text-[10px] px-2 py-1.5 rounded-xl font-bold transition">로그아웃</button>
-                    <button onclick="switchTab('settings')" class="bg-white/15 hover:bg-white/25 text-white text-[10px] px-2 py-1.5 rounded-xl font-bold transition"><i class="fa-solid fa-gear mr-1"></i>설정</button>
                 </div>
             </header>
 
@@ -257,8 +256,8 @@
                 <button onclick="handleBottomNavTap('meetings')" class="tab-btn flex flex-col items-center text-slate-400 hover:text-indigo-600 transition min-w-[52px]" data-tab="meetings">
                     <i class="fa-solid fa-calendar-days text-lg mb-0.5"></i><span class="text-[10px]">회의소집</span>
                 </button>
-                <button onclick="handleBottomNavTap('departments')" class="tab-btn flex flex-col items-center text-slate-400 hover:text-indigo-600 transition min-w-[52px]" data-tab="departments">
-                    <i class="fa-solid fa-people-group text-lg mb-0.5"></i><span class="text-[10px]">부서</span>
+                <button onclick="handleBottomNavTap('settings')" class="tab-btn flex flex-col items-center text-slate-400 hover:text-indigo-600 transition min-w-[52px]" data-tab="settings">
+                    <i class="fa-solid fa-gear text-lg mb-0.5"></i><span class="text-[10px]">설정</span>
                 </button>
             </nav>
         </div>
@@ -581,18 +580,7 @@
 
 
         <!-- Department Management -->
-        <div id="department-admin-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-end justify-center">
-            <div class="modal-content bg-white w-full max-w-md rounded-t-3xl p-5 max-h-[90vh] overflow-y-auto relative">
-                <button onclick="closeModal('department-admin-modal')" class="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button>
-                <h3 class="text-lg font-bold text-indigo-700 pr-10">부서 관리</h3>
-                <p class="text-[11px] text-slate-500 mt-1 mb-4">부서 이름을 추가·수정·삭제하고 학생회원을 부장·차장·부원으로 배정합니다. 한 부서에는 부장 1명, 차장 1명만 지정할 수 있습니다.</p>
-                <div class="flex gap-2 mb-4">
-                    <input id="new-department-name" class="flex-1 bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl text-xs" placeholder="새 부서 이름">
-                    <button onclick="addDepartment()" class="px-3 py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs">부서 추가</button>
-                </div>
-                <div id="department-admin-list" class="space-y-4"></div>
-            </div>
-        </div>
+        
 
         <!-- All Members Directory / Admin Management -->
         <div id="member-directory-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-end justify-center">
@@ -1249,7 +1237,7 @@
             let reopenTab='home';
             try{
                 const savedTab=sessionStorage.getItem('sc_reopen_tab_after_refresh');
-                if(['announcements','discipline','home','meetings','departments'].includes(savedTab)){
+                if(['announcements','discipline','home','meetings','settings'].includes(savedTab)){
                     reopenTab=savedTab;
                 }
                 sessionStorage.removeItem('sc_reopen_tab_after_refresh');
@@ -1320,11 +1308,12 @@
                 return;
             }
 
-            // 공지/선도/회의소집/부서는 다시 눌러도 전체 새로고침하지 않음
+            // 공지/선도/회의소집/설정은 다시 눌러도 전체 새로고침하지 않음
             switchTab(tab);
         }
 
         function switchTab(tab) {
+            if(tab==='departments') tab='settings';
             currentTab = tab;
             const activeNavTab = ['records','duties','manual'].includes(tab) ? 'discipline' : tab;
             document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -1473,9 +1462,6 @@
                         <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm"><p class="text-slate-600 leading-relaxed whitespace-pre-line">${manual}</p></div>
                         ${isAdmin ? `<div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm"><h3 class="font-bold mb-2">접수된 수정 요청</h3>${requests.length?requests.map(r=>`<div class="border-t py-2"><b>${r.user}</b> <span class="text-slate-400">${r.date}</span><p class="whitespace-pre-line mt-1">${r.content}</p></div>`).join(''):'<p class="text-slate-400">요청 없음</p>'}</div>`:''}
                     </div>`;
-            } else if (tab === 'departments') {
-                container.innerHTML = `<div id="department-hub" class="space-y-4"></div>`;
-                renderDepartmentHub();
             } else if (tab === 'announcements') {
                 container.innerHTML = `
                     <div class="space-y-4">
@@ -2193,12 +2179,124 @@
             openModal('duty-member-modal');
         }
 
+        function effectiveMemberForDutyBase(base,dateStr){
+            let actual=canonicalMemberName(base.memberName);
+            const original=actual;
+            const swaps=(dbCache.swaps[dbCache.currentOrgCode]||[]).filter(x=>x.status==='완료');
+
+            for(const sw of swaps){
+                const requester=canonicalMemberName(sw.user);
+                const accepter=canonicalMemberName(sw.acceptedBy);
+
+                // 요청자의 원래 근무일 -> 수락자가 근무
+                if(
+                    dateStr===sw.date &&
+                    original===requester &&
+                    (!sw.dutyType || base.dutyType===sw.dutyType) &&
+                    (!sw.time || base.time===sw.time)
+                ){
+                    actual=accepter;
+                }
+
+                // 수락자의 교환 근무일 -> 요청자가 근무
+                if(
+                    sw.acceptedDate &&
+                    dateStr===sw.acceptedDate &&
+                    original===accepter &&
+                    (!sw.acceptedDutyType || base.dutyType===sw.acceptedDutyType) &&
+                    (!sw.acceptedTime || base.time===sw.acceptedTime)
+                ){
+                    actual=requester;
+                }
+            }
+
+            return actual;
+        }
+
         function renderDutyScheduleList(){
-            const el=document.getElementById('duty-schedule-list');if(!el)return;const list=(dbCache.duties[dbCache.currentOrgCode]||[]).filter(x=>x.kind!=='pause');
-            const pause=getDutyPause(),status=document.getElementById('duty-pause-status');if(status)status.innerHTML=pause?`<div class="text-amber-700 font-bold">현재 ${pause.endDate}까지 지도 중지 중 <button onclick="resumeDuties()" class="ml-2 underline">지금 해제</button></div>`:'<div class="text-slate-500">현재 지도 중지 없음</div>';
-            if(!list.length){el.innerHTML='<p class="text-center text-xs text-slate-400 py-6">배정된 일정이 없습니다.</p>';return}
-            const groups=['월요일','화요일','수요일','목요일','금요일'].map(day=>{const bases=list.filter(x=>x.day===day);return{day,bases,next:bases.length?bases.map(nextDateForDutyBase).sort()[0]:'9999-12-31'}}).filter(x=>x.bases.length).sort((a,b)=>a.next.localeCompare(b.next));
-            el.innerHTML=groups.map((g,idx)=>`<details class="bg-white rounded-2xl border shadow-sm overflow-hidden" ${idx===0?'open':''}><summary class="p-4 cursor-pointer flex justify-between"><b>${g.day}</b><span class="text-[11px] text-indigo-600">다음 지도 ${g.next}</span></summary><div class="border-t p-3 space-y-2">${g.bases.slice().sort((a,b)=>String(a.time).localeCompare(String(b.time))).map(x=>{const name=canonicalMemberName(x.memberName);return`<div class="bg-slate-50 border rounded-xl p-3"><div class="flex justify-between gap-2"><button onclick="openDutyMemberSchedule(${JSON.stringify(name)})" class="text-left flex-1"><b>${name}</b><div class="text-[10px] text-slate-500 mt-1">${x.dutyType} · ${x.time} · ~ ${x.endDate||'-'}</div></button>${currentUserIsAdmin()?`<div class="flex gap-1 self-center"><button onclick="openDutyEditModal(${JSON.stringify(x.id)})" class="px-2 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg font-bold text-[10px]">수정</button><button onclick="deleteDutySchedule(${JSON.stringify(x.id)})" class="px-2 py-1.5 bg-rose-50 text-rose-600 rounded-lg font-bold text-[10px]">삭제</button></div>`:''}</div></div>`}).join('')}</div></details>`).join('');
+            const el=document.getElementById('duty-schedule-list');
+            if(!el)return;
+
+            const list=(dbCache.duties[dbCache.currentOrgCode]||[]).filter(x=>x.kind!=='pause');
+            const pause=getDutyPause();
+            const status=document.getElementById('duty-pause-status');
+
+            if(status){
+                status.innerHTML=pause
+                    ? `<div class="text-amber-700 font-bold">현재 ${pause.endDate}까지 지도 중지 중 <button onclick="resumeDuties()" class="ml-2 underline">지금 해제</button></div>`
+                    : '<div class="text-slate-500">현재 지도 중지 없음</div>';
+            }
+
+            if(!list.length){
+                el.innerHTML='<p class="text-center text-xs text-slate-400 py-6">배정된 일정이 없습니다.</p>';
+                return;
+            }
+
+            const groups=['월요일','화요일','수요일','목요일','금요일']
+                .map(day=>{
+                    const bases=list.filter(x=>x.day===day);
+                    return {
+                        day,
+                        bases,
+                        next:bases.length
+                            ? bases.map(nextDateForDutyBase).sort()[0]
+                            : '9999-12-31'
+                    };
+                })
+                .filter(x=>x.bases.length)
+                .sort((a,b)=>a.next.localeCompare(b.next));
+
+            el.innerHTML=groups.map((g,idx)=>{
+                const cards=g.bases
+                    .slice()
+                    .sort((a,b)=>String(a.time).localeCompare(String(b.time)))
+                    .map(x=>{
+                        const originalName=canonicalMemberName(x.memberName);
+                        const nextDate=nextDateForDutyBase(x);
+                        const actualName=effectiveMemberForDutyBase(x,nextDate);
+                        const swapped=actualName && actualName!==originalName;
+
+                        return `
+                            <div class="bg-slate-50 border rounded-xl p-3">
+                                <div class="flex justify-between gap-2">
+                                    <button onclick="openDutyMemberSchedule(${JSON.stringify(actualName||originalName)})" class="text-left flex-1">
+                                        <div class="flex items-center gap-2 flex-wrap">
+                                            <b>${actualName||originalName}</b>
+                                            ${swapped
+                                                ? `<span class="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[9px] font-bold">대체 근무 반영</span>`
+                                                : ''
+                                            }
+                                        </div>
+                                        <div class="text-[10px] text-slate-500 mt-1">
+                                            ${nextDate} · ${x.dutyType} · ${x.time}
+                                            ${x.endDate?` · ~ ${x.endDate}`:''}
+                                        </div>
+                                        ${swapped
+                                            ? `<div class="text-[10px] text-indigo-600 mt-1">기본 배정: ${originalName} → 실제 근무: ${actualName}</div>`
+                                            : ''
+                                        }
+                                    </button>
+
+                                    ${currentUserIsAdmin()
+                                        ? `<div class="flex gap-1 self-center">
+                                            <button onclick="openDutyEditModal(${JSON.stringify(x.id)})" class="px-2 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg font-bold text-[10px]">수정</button>
+                                            <button onclick="deleteDutySchedule(${JSON.stringify(x.id)})" class="px-2 py-1.5 bg-rose-50 text-rose-600 rounded-lg font-bold text-[10px]">삭제</button>
+                                           </div>`
+                                        : ''
+                                    }
+                                </div>
+                            </div>`;
+                    }).join('');
+
+                return `
+                    <details class="bg-white rounded-2xl border shadow-sm overflow-hidden" ${idx===0?'open':''}>
+                        <summary class="p-4 cursor-pointer flex justify-between">
+                            <b>${g.day}</b>
+                            <span class="text-[11px] text-indigo-600">다음 지도 ${g.next}</span>
+                        </summary>
+                        <div class="border-t p-3 space-y-2">${cards}</div>
+                    </details>`;
+            }).join('');
         }
 
         async function deleteDutySchedule(id){
@@ -2297,7 +2395,7 @@
         async function submitSwap(){
             const pending=(dbCache.swaps[dbCache.currentOrgCode]||[]).find(s=>s.user===dbCache.currentUser.name&&s.status==='대기중');if(pending)return showAlert('대체 근무 요청은 동시에 하나만 등록할 수 있습니다.');
             const d=document.getElementById('swap-next-assignment')?._duty,reason=document.getElementById('swap-reason').value.trim();if(!d)return showAlert('맞교환할 일정을 찾지 못했습니다.');
-            const list=(dbCache.swaps[dbCache.currentOrgCode]||=[]);list.unshift({id:Date.now(),user:dbCache.currentUser.name,date:d.date,dutyType:d.dutyType,time:d.time,reason,status:'대기중',acceptedBy:null});
+            const list=(dbCache.swaps[dbCache.currentOrgCode]||=[]);list.unshift({id:Date.now(),user:dbCache.currentUser.name,requesterUserId:dbCache.currentUser.id||null,date:d.date,dutyType:d.dutyType,time:d.time,reason,status:'대기중',acceptedBy:null});
             await syncSubColToFirestore('swaps',dbCache.currentOrgCode,list);closeModal('swap-modal');if(currentTab==='duties')renderSwapList();showAlert('가장 빠른 지도 일정으로 대체 근무 요청을 등록했습니다.');
         }
         function renderSwapList(){
@@ -2340,10 +2438,24 @@
             s.requestTime=requesterDuty.time;
 
             const ok=await syncSubColToFirestore('swaps',dbCache.currentOrgCode,list);
-            // 기존 sync 함수는 실패 시 알림을 띄우므로 이후 최신 데이터를 다시 읽습니다.
+            if(!ok)return;
+
+            // 매칭이 서버에 저장된 뒤 요청자 본인에게만 푸시 알림
+            await sendCouncilPush(
+                'swap_match',
+                '대체 근무 매칭 완료',
+                `${dbCache.currentUser.name} 님이 대체 근무 요청을 수락했습니다. ${s.date} 일정이 ${my.date} 일정과 교환되었습니다.`,
+                [s.user],
+                null,
+                s.id
+            );
+
             await refreshAppData(false,true);
 
-            if(currentTab==='duties')renderSwapList();
+            if(currentTab==='duties'){
+                renderSwapList();
+                renderDutyScheduleList();
+            }
             updateHomeDashboardData();
             showAlert(`${s.user}님의 ${s.date} 일정과 내 ${my.date} 일정이 즉시 맞교환되었습니다.`);
         }
@@ -2521,7 +2633,7 @@
         function openNewMeetingModal(){meetingComposerContext=null;editingMeetingId=null;document.getElementById('meeting-title').value='';document.getElementById('meeting-details').value='';document.getElementById('meeting-time').value='';const h=document.getElementById('meeting-modal-heading');if(h)h.textContent='회의 소집 공지 등록';const hint=document.getElementById('meeting-target-hint');if(hint)hint.textContent='체크된 회원만 푸시 알림과 참석/불참 응답 권한을 받습니다. 모든 인원을 선택하면 전인원 소집으로 표시됩니다.';renderMeetingTargetMembers();openModal('meeting-modal');}
         function openMeetingForEdit(id){const m=(dbCache.meetings[dbCache.currentOrgCode]||[]).find(x=>x.id===id);if(!m)return;meetingComposerContext=m.scope==='department'?{departmentId:m.departmentId,departmentName:m.departmentName,targets:m.targets||[]}:null;editingMeetingId=id;document.getElementById('meeting-title').value=m.title;document.getElementById('meeting-details').value=m.details||'';document.getElementById('meeting-time').value=m.time;const sel=document.getElementById('meeting-loc-select');if(['학생회실','컨퍼런스홀'].includes(m.loc)){sel.value=m.loc;toggleMeetingCustomLoc(m.loc)}else{sel.value='기타';toggleMeetingCustomLoc('기타');document.getElementById('meeting-custom-loc').value=m.loc}const h=document.getElementById('meeting-modal-heading');if(h)h.textContent=m.scope==='department'?`${m.departmentName||departmentDisplayName(m.departmentId)} 회의 수정`:'회의 소집 수정';renderMeetingTargetMembers(m.targets||null,meetingComposerContext?.targets||null,!!meetingComposerContext);openModal('meeting-modal');}
         function meetingAudienceLabel(m){const org=currentOrg(),targets=m.targets||[];if(m.scope==='department')return m.departmentName||departmentDisplayName(m.departmentId);const all=(org?.members||[]).map(x=>x.name);return targets.length===all.length&&all.every(n=>targets.includes(n))?'전인원 소집':targets.join(', ');}
-        async function sendCouncilPush(kind,title,body,targetNames=null,departmentId=null){
+        async function sendCouncilPush(kind,title,body,targetNames=null,departmentId=null,swapId=null){
             try{
                 const sb=requireSupabase();if(!sb)return false;
                 const {data:{session}}=await sb.auth.getSession();
@@ -2531,7 +2643,7 @@
                 }
                 const {data,error}=await sb.functions.invoke('send-council-push',{
                     headers:{Authorization:`Bearer ${session.access_token}`},
-                    body:{orgCode:dbCache.currentOrgCode,kind,title,body,targetNames,departmentId}
+                    body:{orgCode:dbCache.currentOrgCode,kind,title,body,targetNames,departmentId,swapId}
                 });
                 if(error){
                     console.error('학생회 푸시 함수 호출 실패:',error);
@@ -2909,7 +3021,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=16',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=19',{scope:'./',updateViaCache:'none'});
         }
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
@@ -3022,7 +3134,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=16',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=19',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
