@@ -54,6 +54,24 @@
         #pull-refresh-indicator i{font-size:15px;transform:rotate(0deg);will-change:transform}
         #pull-refresh-indicator.refreshing i{animation:pullRefreshSpin .68s linear infinite}
         @keyframes pullRefreshSpin{to{transform:rotate(360deg)}}
+        /* v20: 한국어 UI 글자 단위 줄바꿈 방지 */
+        body, button, label, span, p, h1, h2, h3, h4, h5, h6,
+        summary, option, select, input, textarea, div, a {
+            word-break: keep-all;
+            overflow-wrap: break-word;
+        }
+
+        /* 하단 메뉴처럼 짧은 메뉴명은 한 줄 유지 */
+        #nav-bar .tab-btn span {
+            white-space: nowrap;
+            word-break: keep-all;
+        }
+
+        /* 버튼 문구는 단어 중간이 아니라 공백 기준으로만 줄바꿈 */
+        button {
+            word-break: keep-all;
+        }
+
     </style>
     <link rel="manifest" href="./manifest.webmanifest">
     <meta name="theme-color" content="#4f46e5">
@@ -254,7 +272,7 @@
                     <span class="text-[11px] mt-0.5 font-extrabold">홈</span>
                 </button>
                 <button onclick="handleBottomNavTap('meetings')" class="tab-btn flex flex-col items-center text-slate-400 hover:text-indigo-600 transition min-w-[52px]" data-tab="meetings">
-                    <i class="fa-solid fa-calendar-days text-lg mb-0.5"></i><span class="text-[10px]">회의소집</span>
+                    <i class="fa-solid fa-calendar-days text-lg mb-0.5"></i><span class="text-[10px]">회의 소집</span>
                 </button>
                 <button onclick="handleBottomNavTap('settings')" class="tab-btn flex flex-col items-center text-slate-400 hover:text-indigo-600 transition min-w-[52px]" data-tab="settings">
                     <i class="fa-solid fa-gear text-lg mb-0.5"></i><span class="text-[10px]">설정</span>
@@ -1308,7 +1326,7 @@
                 return;
             }
 
-            // 공지/선도/회의소집/설정은 다시 눌러도 전체 새로고침하지 않음
+            // 공지/선도/회의 소집/설정은 다시 눌러도 전체 새로고침하지 않음
             switchTab(tab);
         }
 
@@ -3021,7 +3039,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=19',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=20',{scope:'./',updateViaCache:'none'});
         }
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
@@ -3134,7 +3152,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=19',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=20',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
@@ -3175,8 +3193,8 @@
             (dbCache.polls[dbCache.currentOrgCode] ||= []).unshift(poll);
             await syncSubColToFirestore('polls',dbCache.currentOrgCode,dbCache.polls[dbCache.currentOrgCode]);
             createSystemNotice(`새 투표: ${title}`,`${details?details+'\
-':''}회의소집 메뉴에서 투표에 참여해주세요.`);
-            await sendCouncilPush('poll',`회의 투표: ${title}`,details||'회의소집 메뉴에서 투표에 참여해주세요.',null);
+':''}회의 소집 메뉴에서 투표에 참여해주세요.`);
+            await sendCouncilPush('poll',`회의 투표: ${title}`,details||'회의 소집 메뉴에서 투표에 참여해주세요.',null);
             closeModal('poll-modal'); renderPollList(); showAlert('투표가 등록되고 푸시 알림을 발송했습니다.');
         }
         function castPollVote(pid,index){
