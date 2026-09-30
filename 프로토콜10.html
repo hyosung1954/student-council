@@ -1,0 +1,2066 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>학생회 통합 관리 플랫폼</title>
+    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="학생회 플랫폼">
+    <meta name="theme-color" content="#4f46e5">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Pretendard', sans-serif; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* CRITICAL: Absolute Foreground Z-Index for Alerts and Notifications (Never covered) */
+        .global-alert-container {
+            position: fixed !important;
+            top: 20px !important;
+            left: 50% !important;
+            transform: translateX(-50%) !important;
+            z-index: 2147483647 !important;
+            width: 90% !important;
+            max-width: 420px !important;
+            pointer-events: none;
+        }
+        .global-alert-toast {
+            pointer-events: auto;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Modals Z-Index */
+        .modal-overlay {
+            z-index: 999990 !important;
+        }
+        .modal-content {
+            z-index: 999995 !important;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 flex justify-center items-center min-h-screen m-0 p-0">
+
+    <!-- Absolute Foreground Global Alert / Toast Container -->
+    <div id="globalAlertContainer" class="global-alert-container"></div>
+
+    <div id="app" class="w-full max-w-md bg-white min-h-screen sm:min-h-[880px] sm:max-h-[920px] sm:rounded-3xl shadow-2xl flex flex-col relative overflow-hidden border border-slate-200">
+        
+        <!-- Withdraw Confirmation Modal -->
+        <div id="withdraw-confirm-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-center justify-center p-4">
+            <div class="modal-content bg-white w-full max-w-xs rounded-2xl p-5 text-center shadow-2xl space-y-4 transform transition-all">
+                <div class="w-12 h-12 bg-amber-50 text-amber-600 rounded-full mx-auto flex items-center justify-center text-lg font-bold">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                </div>
+                <h4 class="font-bold text-slate-800 text-sm">조직 탈퇴 확인</h4>
+                <p class="text-xs text-slate-600 leading-relaxed">정말 탈퇴하시겠습니까?</p>
+                <div class="grid grid-cols-2 gap-2 pt-1">
+                    <button onclick="closeWithdrawModal()" class="py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs transition">아니오</button>
+                    <button onclick="executeWithdrawal()" class="py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold text-xs transition shadow-sm">예</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bulk Delete Confirmation Modal -->
+        <div id="bulk-delete-confirm-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-center justify-center p-4">
+            <div class="modal-content bg-white w-full max-w-xs rounded-2xl p-5 text-center shadow-2xl space-y-4 transform transition-all">
+                <div class="w-12 h-12 bg-rose-50 text-rose-600 rounded-full mx-auto flex items-center justify-center text-lg font-bold">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                </div>
+                <h4 class="font-bold text-slate-800 text-sm">일괄 삭제 확인</h4>
+                <p id="bulk-delete-msg" class="text-xs text-slate-600 leading-relaxed">정말 일괄 삭제하시겠습니까?</p>
+                <div class="grid grid-cols-2 gap-2 pt-1">
+                    <button onclick="closeBulkDeleteModal()" class="py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs transition">아니오</button>
+                    <button onclick="executeBulkDelete()" class="py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold text-xs transition shadow-sm">예</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Auth Screen -->
+        <div id="auth-screen" class="flex-1 bg-gradient-to-br from-indigo-600 to-violet-700 p-6 flex flex-col justify-center items-center text-white overflow-y-auto">
+            <div class="w-full max-w-sm bg-white/15 backdrop-blur-md rounded-3xl p-6 shadow-2xl border border-white/20 space-y-4">
+                <div class="text-center space-y-1.5">
+                    <div class="w-14 h-14 bg-white rounded-2xl mx-auto flex items-center justify-center shadow-lg text-indigo-600 text-xl font-bold">
+                        <i class="fa-solid fa-shield-halved"></i>
+                    </div>
+                    <h1 class="text-2xl font-bold tracking-tight">학생회 신원 인증</h1>
+                    <p class="text-xs text-indigo-200">실시간 클라우드 연동 학생회 플랫폼</p>
+                </div>
+
+                <!-- Login Container -->
+                <div id="auth-login-container" class="space-y-3 text-slate-800 text-xs">
+                    <div>
+                        <label class="block text-indigo-100 font-semibold mb-1">이름 (아이디)</label>
+                        <input id="login-name" type="text" placeholder="이름을 입력하세요" class="w-full bg-white/95 border border-transparent rounded-xl px-3 py-2.5 font-bold focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-indigo-100 font-semibold mb-1">비밀번호</label>
+                        <input id="login-pw" type="password" placeholder="비밀번호" class="w-full bg-white/95 border border-transparent rounded-xl px-3 py-2.5 font-bold focus:outline-none">
+                    </div>
+                    <button onclick="handleLogin()" class="w-full py-3.5 bg-white text-indigo-600 rounded-xl font-bold text-sm shadow-lg hover:bg-indigo-50 transition mt-2">
+                        로그인 하기
+                    </button>
+                    <p class="text-center text-xs text-indigo-100 mt-4 cursor-pointer hover:underline font-medium" onclick="toggleAuthMode(true)">
+                        계정이 없으신가요? <b>회원가입하기</b>
+                    </p>
+                </div>
+
+                <!-- Signup Container -->
+                <div id="auth-signup-container" class="space-y-3 text-slate-800 text-xs hidden">
+                    <div>
+                        <label class="block text-indigo-100 font-semibold mb-1">학년</label>
+                        <select id="signup-grade" class="w-full bg-white/95 border border-transparent rounded-xl px-3 py-2.5 font-bold focus:outline-none">
+                            <option value="1학년">1학년</option>
+                            <option value="2학년">2학년</option>
+                            <option value="3학년">3학년</option>
+                        </select>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-indigo-100 font-semibold mb-1">반</label>
+                            <select id="signup-class" class="w-full bg-white/95 border border-transparent rounded-xl px-3 py-2.5 font-bold focus:outline-none">
+                                <option value="1반">1반</option><option value="2반">2반</option><option value="3반">3반</option>
+                                <option value="4반">4반</option><option value="5반">5반</option><option value="6반">6반</option>
+                                <option value="7반">7반</option><option value="8반">8반</option><option value="9반">9반</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-indigo-100 font-semibold mb-1">번호</label>
+                            <select id="signup-number" class="w-full bg-white/95 border border-transparent rounded-xl px-3 py-2.5 font-bold focus:outline-none">
+                                <!-- Populated dynamically -->
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-indigo-100 font-semibold mb-1">이름</label>
+                        <input id="signup-name" type="text" placeholder="이름" class="w-full bg-white/95 border border-transparent rounded-xl px-3 py-2.5 font-bold focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-indigo-100 font-semibold mb-1">비밀번호 설정</label>
+                        <input id="signup-pw" type="password" placeholder="사용할 비밀번호" class="w-full bg-white/95 border border-transparent rounded-xl px-3 py-2.5 font-bold focus:outline-none">
+                    </div>
+                    <button onclick="handleSignup()" class="w-full py-3.5 bg-emerald-600 text-white rounded-xl font-bold text-sm shadow-lg hover:bg-emerald-700 transition mt-2">
+                        회원가입 완료
+                    </button>
+                    <p class="text-center text-xs text-indigo-100 mt-4 cursor-pointer hover:underline font-medium" onclick="toggleAuthMode(false)">
+                        이미 계정이 있으신가요? <b>로그인하기</b>
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Org Screen -->
+        <div id="org-screen" class="flex-1 bg-slate-50 p-6 flex flex-col justify-center items-center overflow-y-auto hidden">
+            <div class="w-full max-w-sm bg-white rounded-3xl p-6 shadow-xl border border-slate-200 space-y-5">
+                <div class="text-center space-y-1">
+                    <div class="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-2xl mx-auto flex items-center justify-center text-xl font-bold shadow-sm">
+                        <i class="fa-solid fa-school"></i>
+                    </div>
+                    <h2 class="text-xl font-bold text-slate-800">조직 참여 및 생성</h2>
+                    <p class="text-xs text-slate-500">다른 기기와 실시간 동기화되는 학생회 조직</p>
+                </div>
+
+                <!-- Join Org -->
+                <div class="space-y-2.5">
+                    <h3 class="text-xs font-bold text-indigo-600 flex items-center"><i class="fa-solid fa-right-to-bracket mr-1.5"></i> 기존 조직 가입하기</h3>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1">조직 코드 입력</label>
+                        <input id="join-org-code" type="text" placeholder="예: council2026" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-bold focus:outline-none focus:border-indigo-600">
+                    </div>
+                    <button onclick="joinOrganization()" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs transition shadow-sm">조직 가입하기</button>
+                </div>
+
+                <div class="border-t border-slate-100 pt-3"></div>
+
+                <!-- Create Org -->
+                <div class="space-y-2.5">
+                    <h3 class="text-xs font-bold text-emerald-600 flex items-center"><i class="fa-solid fa-plus-circle mr-1.5"></i> 새 조직 생성하기 (생성자 = 단장)</h3>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1">조직 명칭</label>
+                        <input id="create-org-name" type="text" placeholder="예: OO 고등학교 학생회" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-bold focus:outline-none focus:border-emerald-600">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1">조직 코드 생성 (영문 필수, 예: council2026)</label>
+                        <input id="create-org-code" type="text" placeholder="예: council2026" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-bold focus:outline-none focus:border-emerald-600">
+                    </div>
+                    <button onclick="createOrganization()" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs transition shadow-sm">조직 생성 및 단장 시작</button>
+                </div>
+
+                <button onclick="logoutToAuth()" class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-bold text-xs transition mt-2">
+                    신원 로그아웃 (다른 계정 로그인)
+                </button>
+            </div>
+        </div>
+
+        <!-- Main App Screen -->
+        <div id="main-app" class="flex-1 flex flex-col h-full overflow-hidden hidden">
+            <!-- Header with Visible Organization Code -->
+            <header class="bg-indigo-600 text-white px-4 py-3 flex justify-between items-center shadow-md z-10">
+                <div class="flex items-center space-x-2.5">
+                    <div id="header-org-avatar" class="w-9 h-9 rounded-xl bg-white/20 overflow-hidden flex items-center justify-center border border-white/30 shadow-inner flex-shrink-0">
+                        <i class="fa-solid fa-school text-white text-sm"></i>
+                    </div>
+                    <div>
+                        <h1 id="header-org-name" class="font-bold text-xs tracking-tight leading-snug">학생회 조직</h1>
+                        <p class="text-[10px] text-indigo-200 leading-none mt-0.5">조직코드: <span id="header-org-code-display" class="font-bold text-yellow-300"></span></p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <span id="header-user-badge" class="text-[10px] bg-indigo-700 px-2 py-1 rounded-lg font-bold">회원</span>
+                    <button onclick="logoutToAuth()" class="bg-indigo-500/80 hover:bg-indigo-700 text-white text-[10px] px-2.5 py-1.5 rounded-xl font-bold transition">로그아웃</button>
+                </div>
+            </header>
+
+            <!-- Main Tab View Container -->
+            <main id="main-content" class="flex-1 overflow-y-auto pb-24 p-4 no-scrollbar">
+                <!-- Tab views injected dynamically -->
+            </main>
+
+            <!-- Bottom Navigation Bar -->
+            <nav id="nav-bar" class="absolute bottom-0 left-0 right-0 bg-white border-t border-slate-200 py-2 px-1 flex justify-around items-center z-20 shadow-lg">
+                <button onclick="switchTab('home')" class="tab-btn flex flex-col items-center text-indigo-600 font-bold transition" data-tab="home">
+                    <i class="fa-solid fa-house text-base mb-0.5"></i>
+                    <span class="text-[10px]">홈</span>
+                </button>
+                <button onclick="switchTab('records')" class="tab-btn flex flex-col items-center text-slate-400 hover:text-indigo-600 transition" data-tab="records">
+                    <i class="fa-solid fa-clipboard-user text-base mb-0.5"></i>
+                    <span class="text-[10px]">선도기록</span>
+                </button>
+                <button onclick="switchTab('duties')" class="tab-btn flex flex-col items-center text-slate-400 hover:text-indigo-600 transition" data-tab="duties">
+                    <i class="fa-solid fa-calendar-week text-base mb-0.5"></i>
+                    <span class="text-[10px]">선도일정</span>
+                </button>
+                <button onclick="switchTab('meetings')" class="tab-btn flex flex-col items-center text-slate-400 hover:text-indigo-600 transition" data-tab="meetings">
+                    <i class="fa-solid fa-calendar-days text-base mb-0.5"></i>
+                    <span class="text-[10px]">회의소집</span>
+                </button>
+                <button onclick="switchTab('manual')" class="tab-btn flex flex-col items-center text-slate-400 hover:text-indigo-600 transition" data-tab="manual">
+                    <i class="fa-solid fa-book-open text-base mb-0.5"></i>
+                    <span class="text-[10px]">매뉴얼</span>
+                </button>
+                <button onclick="switchTab('announcements')" class="tab-btn flex flex-col items-center text-slate-400 hover:text-indigo-600 transition" data-tab="announcements">
+                    <i class="fa-solid fa-bullhorn text-base mb-0.5"></i>
+                    <span class="text-[10px]">공지</span>
+                </button>
+                <button onclick="switchTab('settings')" class="tab-btn flex flex-col items-center text-slate-400 hover:text-indigo-600 transition" data-tab="settings">
+                    <i class="fa-solid fa-gear text-base mb-0.5"></i>
+                    <span class="text-[10px]">설정</span>
+                </button>
+            </nav>
+        </div>
+
+        <!-- 1. Discipline Record Modal -->
+        <div id="discipline-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-end justify-center">
+            <div class="modal-content bg-white w-full max-w-md rounded-t-3xl p-6 max-h-[85vh] overflow-y-auto transform transition-all relative">
+                <button onclick="closeModal('discipline-modal')" class="absolute top-5 right-5 w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-sm transition">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+                <h3 id="discipline-modal-title" class="text-lg font-bold text-slate-800 mb-4 pr-8">선도 단속 기록 작성</h3>
+                <input type="hidden" id="edit-record-id" value="">
+                <div class="space-y-3 text-xs">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">지도 날짜 선택</label>
+                        <input id="target-date" type="date" class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl font-bold">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">일시 유형 선택</label>
+                        <select id="target-session-type" class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl font-bold">
+                            <option value="아침지도">아침지도</option>
+                            <option value="점심지도">점심지도</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">학년 선택 (1~3학년)</label>
+                        <select id="target-grade" class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl font-bold">
+                            <option value="1학년">1학년</option>
+                            <option value="2학년">2학년</option>
+                            <option value="3학년">3학년</option>
+                        </select>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">반 선택 (1~9반)</label>
+                            <select id="target-class-sel" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold">
+                                <option value="1반">1반</option><option value="2반">2반</option><option value="3반">3반</option>
+                                <option value="4반">4반</option><option value="5반">5반</option><option value="6반">6반</option>
+                                <option value="7반">7반</option><option value="8반">8반</option><option value="9반">9반</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">번호 선택 (1~25번)</label>
+                            <select id="target-num-sel" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold">
+                                <!-- Populated dynamically -->
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">학생 이름</label>
+                        <input id="target-name" type="text" placeholder="학생 이름 입력" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">위반 사유 선택</label>
+                        <select id="target-reason" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold">
+                            <!-- Populated dynamically -->
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">추가 메모 (선택)</label>
+                        <textarea id="target-memo" placeholder="특이사항 입력" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl h-16 resize-none"></textarea>
+                    </div>
+                    <button onclick="saveDisciplineRecord()" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm transition shadow-sm mt-2">단속 기록 저장하기</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 1-B. Discipline Student Detail Modal -->
+        <div id="discipline-detail-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-end justify-center">
+            <div class="modal-content bg-white w-full max-w-md rounded-t-3xl p-6 max-h-[85vh] overflow-y-auto transform transition-all relative">
+                <button onclick="closeModal('discipline-detail-modal')" class="absolute top-5 right-5 w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-sm transition">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+                <div id="discipline-detail-content" class="space-y-4 pt-1">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. Swap Modal -->
+        <div id="swap-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-end justify-center">
+            <div class="modal-content bg-white w-full max-w-md rounded-t-3xl p-6 max-h-[85vh] overflow-y-auto transform transition-all relative">
+                <button onclick="closeModal('swap-modal')" class="absolute top-5 right-5 w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-sm transition">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+                <h3 class="text-lg font-bold text-slate-800 mb-4 pr-8">대타 맞교환(스왑) 신청</h3>
+                <div class="space-y-3 text-xs">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">교체할 내 선도 날짜 및 일정</label>
+                        <input id="swap-date" type="date" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">요청 사유 및 메시지</label>
+                        <textarea id="swap-reason" placeholder="예: 개인 사정으로 인해 월요일 교문지도 대타 구합니다." class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl h-20 resize-none"></textarea>
+                    </div>
+                    <button onclick="submitSwap()" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm transition shadow-sm mt-2">대타 스왑 등록</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. Meeting Modal -->
+        <div id="meeting-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-end justify-center">
+            <div class="modal-content bg-white w-full max-w-md rounded-t-3xl p-6 max-h-[85vh] overflow-y-auto transform transition-all relative">
+                <button onclick="closeModal('meeting-modal')" class="absolute top-5 right-5 w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-sm transition">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+                <h3 class="text-lg font-bold text-slate-800 mb-4 pr-8">회의 소집 공지 등록</h3>
+                <div class="space-y-3 text-xs">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">회의 제목 및 안건</label>
+                        <input id="meeting-title" type="text" placeholder="예: 정기 학생회 회의" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">회의 장소 선택</label>
+                        <select id="meeting-loc-select" onchange="toggleMeetingCustomLoc(this.value)" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold">
+                            <option value="학생회실">학생회실</option>
+                            <option value="컨퍼런스홀">컨퍼런스홀</option>
+                            <option value="기타">기타 (직접 입력)</option>
+                        </select>
+                    </div>
+                    <div id="meeting-custom-loc-div" class="hidden">
+                        <label class="block font-bold text-slate-700 mb-1">직접 입력 장소</label>
+                        <input id="meeting-custom-loc" type="text" placeholder="장소를 입력하세요" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">회의 시간 (5분 단위)</label>
+                        <input id="meeting-time" type="datetime-local" step="300" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold">
+                    </div>
+                    <button onclick="submitMeeting()" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm transition shadow-sm mt-2">회의 소집 및 알림 발송</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. Notice Modal -->
+        <div id="notice-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-end justify-center">
+            <div class="modal-content bg-white w-full max-w-md rounded-t-3xl p-6 max-h-[85vh] overflow-y-auto transform transition-all relative">
+                <button onclick="closeModal('notice-modal')" class="absolute top-5 right-5 w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-sm transition">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+                <h3 class="text-lg font-bold text-slate-800 mb-4 pr-8">전체 공지사항 등록</h3>
+                <div class="space-y-3 text-xs">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">공지 제목</label>
+                        <input id="notice-title" type="text" placeholder="제목 입력" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">공지 내용</label>
+                        <textarea id="notice-content" placeholder="공지 내용을 상세히 입력하세요" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl h-24 resize-none"></textarea>
+                    </div>
+                    <button onclick="submitNotice()" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm transition shadow-sm mt-2">공지 등록하기</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 5. Admin Duty Schedule Modal -->
+        <div id="duty-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-end justify-center">
+            <div class="modal-content bg-white w-full max-w-md rounded-t-3xl p-6 max-h-[85vh] overflow-y-auto transform transition-all relative">
+                <button onclick="closeModal('duty-modal')" class="absolute top-5 right-5 w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-sm transition">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+                <h3 class="text-lg font-bold text-indigo-600 mb-1 pr-8">📅 선도 지도 일정 배정</h3>
+                <p class="text-xs text-slate-500 mb-4">매주 월요일 ~ 금요일 선도 지도 당번을 배정합니다.</p>
+                <div class="space-y-3 text-xs">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">요일 선택 (월~금)</label>
+                        <select id="duty-day" class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl font-bold">
+                            <option value="월요일">매주 월요일</option>
+                            <option value="화요일">매주 화요일</option>
+                            <option value="수요일">매주 수요일</option>
+                            <option value="목요일">매주 목요일</option>
+                            <option value="금요일">매주 금요일</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">지도 유형</label>
+                        <select id="duty-type" class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl font-bold">
+                            <option value="아침지도">아침지도</option>
+                            <option value="점심지도">점심지도</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">담당 학생 선택 (조직원 목록)</label>
+                        <select id="duty-member-select" class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl font-bold">
+                            <!-- Populated from org members -->
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">지도 시간 (5분 단위)</label>
+                        <input id="duty-time" type="time" step="300" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold" value="08:00">
+                    </div>
+                    <button onclick="submitDutySchedule()" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm transition shadow-sm mt-2">일정 등록 및 배정</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 6. Admin Role, Image & Custom Reasons Management Modal -->
+        <div id="admin-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-end justify-center">
+            <div class="modal-content bg-white w-full max-w-md rounded-t-3xl p-6 max-h-[85vh] overflow-y-auto transform transition-all relative">
+                <button onclick="closeModal('admin-modal')" class="absolute top-5 right-5 w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-sm transition">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+                <h3 class="text-lg font-bold text-rose-600 mb-1 pr-8">🛠️ 조직 관리 및 설정</h3>
+                <p class="text-xs text-slate-500 mb-4">조직 대표 이미지, 선도 위반 사유(추가/수정/삭제) 및 역할을 관리합니다.</p>
+                
+                <!-- Org Image Upload Section -->
+                <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200 mb-4 space-y-2 text-xs">
+                    <label class="block font-bold text-slate-700">조직 대표 이미지 변경</label>
+                    <div class="flex items-center space-x-3">
+                        <img id="admin-org-preview" src="https://placehold.co/100x100/e0e7ff/4f46e5?text=Org" class="w-14 h-14 rounded-2xl object-cover border border-slate-200 shadow-sm flex-shrink-0">
+                        <input type="file" accept="image/*" onchange="uploadOrgImage(event)" class="text-xs text-slate-500 file:mr-2 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-indigo-50 file:text-indigo-600 hover:file:bg-indigo-100 cursor-pointer">
+                    </div>
+                </div>
+
+                <!-- Custom Discipline Reasons Section -->
+                <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200 mb-4 space-y-2 text-xs">
+                    <label class="block font-bold text-slate-700">선도 위반 사유 항목 관리 (추가 / 수정 / 삭제)</label>
+                    <div class="flex gap-2">
+                        <input id="new-reason-input" type="text" placeholder="예: 무단 이탈 및 흡연" class="flex-1 bg-white border border-slate-200 px-3 py-2 rounded-xl text-xs font-semibold">
+                        <button onclick="addReason()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-xl font-bold">추가</button>
+                    </div>
+                    <div id="admin-reasons-list" class="flex flex-wrap gap-1.5 pt-2">
+                        <!-- All reasons with edit and delete buttons -->
+                    </div>
+                </div>
+
+                <h4 class="font-bold text-slate-800 text-xs mb-2">조직원 역할 임명</h4>
+                <div id="admin-members-list" class="space-y-2.5 max-h-40 overflow-y-auto no-scrollbar">
+                    <!-- Dynamic member roles -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Supabase Integration -->
+    <script type="module">
+        import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+        // TODO: Supabase Dashboard > Project Settings > API에서 아래 두 값을 넣어주세요.
+        const SUPABASE_URL = "https://epktuifzkbcesqbxkiwx.supabase.co";
+        const SUPABASE_ANON_KEY = "sb_publishable_9EnW_zPemjV8pPv8Y9Rvsg_qdpBFKc0";
+
+        let supabase = null;
+        let supabaseReady = false;
+
+        try {
+            if (!SUPABASE_URL.includes("YOUR-PROJECT") && !SUPABASE_ANON_KEY.includes("YOUR_SUPABASE")) {
+                supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+                    auth: {
+                        persistSession: true,
+                        autoRefreshToken: true,
+                        detectSessionInUrl: true
+                    }
+                });
+                supabaseReady = true;
+            } else {
+                console.warn("Supabase 설정이 아직 입력되지 않았습니다.");
+            }
+        } catch (e) {
+            console.error("Supabase 초기화 실패:", e);
+        }
+
+        window.appState = {
+            supabase,
+            isSupabaseReady: supabaseReady
+        };
+
+        // 두 번째 script에서 함수를 등록한 뒤에도 안전하게 실행되도록 Promise로 연결합니다.
+        window.supabaseReadyPromise = Promise.resolve();
+
+        if (supabaseReady) {
+            window.supabaseReadyPromise = (async () => {
+                try {
+                    const { data: { session } } = await supabase.auth.getSession();
+                    window.appState.session = session;
+                } catch (e) {
+                    console.warn("Supabase 세션 확인 실패:", e);
+                }
+            })();
+        }
+    </script>
+
+    <script>
+        const memoryFallback = {};
+        const safeStorage = {
+            getItem(k) { try { return localStorage.getItem(k); } catch(e) { return memoryFallback[k] || null; } },
+            setItem(k, v) { try { localStorage.setItem(k, v); } catch(e) { memoryFallback[k] = v; } },
+            removeItem(k) { try { localStorage.removeItem(k); } catch(e) { delete memoryFallback[k]; } }
+        };
+
+        // Absolute Foreground Alert Toast (z-index 2147483647)
+        function showAlert(message, title = "알림") {
+            const container = document.getElementById('globalAlertContainer');
+            if (!container) return;
+
+            const toast = document.createElement('div');
+            toast.className = 'global-alert-toast bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center justify-between space-x-3 mb-2 transition-all transform translate-y-0 opacity-100';
+            toast.innerHTML = `
+                <div class="flex items-center space-x-2.5">
+                    <div class="w-8 h-8 rounded-full bg-indigo-500 text-white flex items-center justify-center font-bold flex-shrink-0 text-sm">
+                        <i class="fa-solid fa-bell"></i>
+                    </div>
+                    <div>
+                        <h5 class="font-bold text-xs">${title}</h5>
+                        <p class="text-[11px] text-slate-200 mt-0.5">${message}</p>
+                    </div>
+                </div>
+                <button onclick="this.parentElement.remove()" class="text-slate-400 hover:text-white p-1 text-sm font-bold">&times;</button>
+            `;
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                if (toast && toast.parentElement) {
+                    toast.style.opacity = '0';
+                    setTimeout(() => toast.remove(), 300);
+                }
+            }, 4500);
+        }
+
+        let currentTab = 'home';
+        let recordsSubTab = 'dates'; // 'dates' or 'cumulative'
+        let pendingBulkDelete = null;
+
+        let dbCache = {
+            users: [],
+            orgs: [],
+            currentUser: JSON.parse(safeStorage.getItem('sc_current_user') || 'null'),
+            currentOrgCode: safeStorage.getItem('sc_current_org') || null,
+            disciplines: {},
+            swaps: {},
+            meetings: {},
+            notices: {},
+            duties: {}
+        };
+
+        function saveLocalCache() {
+            // 로컬에는 로그인 세션의 UI 상태만 저장합니다. 실제 데이터는 Supabase에 저장됩니다.
+            safeStorage.setItem('sc_current_user', JSON.stringify(dbCache.currentUser));
+            safeStorage.setItem('sc_current_org', dbCache.currentOrgCode || '');
+        }
+
+        function requireSupabase() {
+            if (!window.appState?.isSupabaseReady || !window.appState.supabase) {
+                showAlert('Supabase 설정이 아직 완료되지 않았습니다. HTML의 SUPABASE_URL과 SUPABASE_ANON_KEY를 확인해주세요.');
+                return null;
+            }
+            return window.appState.supabase;
+        }
+
+        // 기존 이름 기반 로그인 UI를 유지하기 위해 이름을 결정적인 내부 이메일로 변환합니다.
+        // 실제 이메일 주소를 받는 방식이 아니므로 테스트용 인증 방식입니다.
+        function authEmailForName(name) {
+            const bytes = new TextEncoder().encode(name.trim());
+            let binary = '';
+            bytes.forEach(b => binary += String.fromCharCode(b));
+            const encoded = btoa(binary)
+                .replace(/\+/g, '-')
+                .replace(/\//g, '_')
+                .replace(/=+$/g, '');
+            return `student.${encoded}@student-council.example.com`;
+        }
+
+        async function loadAllFromSupabase() {
+            const sb = requireSupabase();
+            if (!sb) return false;
+
+            try {
+                const { data: orgs, error: orgError } = await sb
+                    .from('organizations')
+                    .select('*')
+                    .order('created_at', { ascending: true });
+
+                if (orgError) throw orgError;
+
+                dbCache.orgs = (orgs || []).map(o => ({
+                    code: o.code,
+                    name: o.name,
+                    imageUrl: o.image_url || '',
+                    reasons: o.reasons || [],
+                    members: o.members || []
+                }));
+
+                const { data: rows, error: dataError } = await sb
+                    .from('org_data')
+                    .select('org_code,data_type,items');
+
+                if (dataError) throw dataError;
+
+                dbCache.disciplines = {};
+                dbCache.swaps = {};
+                dbCache.meetings = {};
+                dbCache.notices = {};
+                dbCache.duties = {};
+
+                (rows || []).forEach(row => {
+                    if (row.data_type === 'disciplines') dbCache.disciplines[row.org_code] = row.items || [];
+                    if (row.data_type === 'swaps') dbCache.swaps[row.org_code] = row.items || [];
+                    if (row.data_type === 'meetings') dbCache.meetings[row.org_code] = row.items || [];
+                    if (row.data_type === 'notices') dbCache.notices[row.org_code] = row.items || [];
+                    if (row.data_type === 'duties') dbCache.duties[row.org_code] = row.items || [];
+                });
+
+                return true;
+            } catch (e) {
+                console.error('Supabase 데이터 로드 실패:', e);
+                showAlert('서버 데이터를 불러오지 못했습니다. Supabase 테이블과 정책을 확인해주세요.');
+                return false;
+            }
+        }
+
+        async function loadCurrentUserFromSupabase() {
+            const sb = requireSupabase();
+            if (!sb) return false;
+
+            const { data: { user: authUser } } = await sb.auth.getUser();
+            if (!authUser) {
+                dbCache.currentUser = null;
+                saveLocalCache();
+                return false;
+            }
+
+            const { data, error } = await sb
+                .from('users')
+                .select('id,grade,class,number,name')
+                .eq('id', authUser.id)
+                .maybeSingle();
+
+            if (error) {
+                console.error('사용자 프로필 로드 실패:', error);
+                return false;
+            }
+
+            if (data) {
+                dbCache.currentUser = data;
+                saveLocalCache();
+                return true;
+            }
+
+            dbCache.currentUser = null;
+            saveLocalCache();
+            return false;
+        }
+
+        async function syncOrgToSupabase(org) {
+            const sb = requireSupabase();
+            if (!sb) return;
+
+            try {
+                const { error } = await sb.from('organizations').upsert({
+                    code: org.code,
+                    name: org.name,
+                    image_url: org.imageUrl || '',
+                    reasons: org.reasons || [],
+                    members: org.members || []
+                }, { onConflict: 'code' });
+
+                if (error) throw error;
+            } catch (e) {
+                console.error('조직 저장 실패:', e);
+                showAlert('조직 정보를 서버에 저장하지 못했습니다.');
+            }
+        }
+
+        async function syncSubColToSupabase(dataType, orgCode, items) {
+            const sb = requireSupabase();
+            if (!sb) return;
+
+            try {
+                const { error } = await sb.from('org_data').upsert({
+                    org_code: orgCode,
+                    data_type: dataType,
+                    items: items || []
+                }, { onConflict: 'org_code,data_type' });
+
+                if (error) throw error;
+            } catch (e) {
+                console.error(`${dataType} 저장 실패:`, e);
+                showAlert('변경 내용을 서버에 저장하지 못했습니다.');
+            }
+        }
+
+        // 기존 함수명을 그대로 유지하여 나머지 1900여 줄의 UI 코드를 최대한 건드리지 않습니다.
+        const syncOrgToFirestore = syncOrgToSupabase;
+        const syncSubColToFirestore = syncSubColToSupabase;
+
+        window.onload = async function() {
+            // Supabase 세션과 서버 데이터를 먼저 불러온 뒤 화면을 갱신합니다.
+            try {
+                await window.supabaseReadyPromise;
+                if (window.appState.isSupabaseReady) {
+                    await loadCurrentUserFromSupabase();
+                    await loadAllFromSupabase();
+                }
+            } catch (e) {
+                console.error('Supabase 초기 로딩 실패:', e);
+            }
+
+            const numSelSignup = document.getElementById('signup-number');
+            const numSelDisc = document.getElementById('target-num-sel');
+            const classSelDisc = document.getElementById('target-class-sel');
+            
+            if (numSelSignup) {
+                let opts = '';
+                for (let i = 1; i <= 25; i++) {
+                    opts += `<option value="${i}">${i}번</option>`;
+                }
+                numSelSignup.innerHTML = opts;
+            }
+            if (numSelDisc) {
+                let opts = '';
+                for (let i = 1; i <= 25; i++) {
+                    opts += `<option value="${i}번">${i}번</option>`;
+                }
+                numSelDisc.innerHTML = opts;
+            }
+            if (classSelDisc) {
+                let opts = '';
+                for (let i = 1; i <= 9; i++) {
+                    opts += `<option value="${i}반">${i}반</option>`;
+                }
+                classSelDisc.innerHTML = opts;
+            }
+
+            setTimeout(() => {
+                checkAndRefreshUI();
+            }, 300);
+        };
+
+        function checkAndRefreshUI() {
+            if (dbCache.currentUser) {
+                checkOrgMembership();
+            } else {
+                showAuthScreen();
+            }
+        }
+
+        function toggleAuthMode(isSignup) {
+            const loginBox = document.getElementById('auth-login-container');
+            const signupBox = document.getElementById('auth-signup-container');
+            if (isSignup) {
+                loginBox.classList.add('hidden');
+                signupBox.classList.remove('hidden');
+            } else {
+                signupBox.classList.add('hidden');
+                loginBox.classList.remove('hidden');
+            }
+        }
+
+        async function handleLogin() {
+            const name = document.getElementById('login-name').value.trim();
+            const pw = document.getElementById('login-pw').value.trim();
+
+            if (!name || !pw) {
+                showAlert('이름과 비밀번호를 모두 입력해주세요.');
+                return;
+            }
+
+            const sb = requireSupabase();
+            if (!sb) return;
+
+            const email = authEmailForName(name);
+            const { data, error } = await sb.auth.signInWithPassword({
+                email,
+                password: pw
+            });
+
+            if (error || !data.user) {
+                console.error('로그인 실패:', error);
+                showAlert('이름 또는 비밀번호가 일치하지 않습니다.');
+                return;
+            }
+
+            const ok = await loadCurrentUserFromSupabase();
+            if (!ok || !dbCache.currentUser) {
+                await sb.auth.signOut();
+                showAlert('사용자 정보를 찾지 못했습니다.');
+                return;
+            }
+
+            await loadAllFromSupabase();
+            checkOrgMembership();
+        }
+
+        async function handleSignup() {
+            const grade = document.getElementById('signup-grade').value;
+            const cls = document.getElementById('signup-class').value;
+            const num = document.getElementById('signup-number').value;
+            const name = document.getElementById('signup-name').value.trim();
+            const pw = document.getElementById('signup-pw').value.trim();
+
+            if (!name || !pw || !cls || !num) {
+                showAlert('모든 정보를 정확히 입력해주세요.');
+                return;
+            }
+
+            if (pw.length < 6) {
+                showAlert('비밀번호는 6자 이상으로 입력해주세요.');
+                return;
+            }
+
+            const sb = requireSupabase();
+            if (!sb) return;
+
+            const email = authEmailForName(name);
+
+            // 이름을 기반으로 만든 내부 이메일을 Supabase Auth의 로그인 ID로 사용합니다.
+            // users 테이블을 미리 조회하지 않아도 되므로, 회원가입 전에는 개인정보를 공개할 필요가 없습니다.
+            const { data: signUpData, error: signUpError } = await sb.auth.signUp({
+                email,
+                password: pw,
+                options: {
+                    data: { display_name: name }
+                }
+            });
+
+            if (signUpError || !signUpData.user) {
+                console.error('회원가입 실패:', signUpError);
+                showAlert(signUpError?.message || '회원가입에 실패했습니다.');
+                return;
+            }
+
+            if (!signUpData.session) {
+                showAlert('회원가입은 완료됐지만 이메일 확인이 필요합니다. Supabase에서 이메일 확인 기능을 끄거나 확인 후 로그인해주세요.');
+                return;
+            }
+
+            const newUser = {
+                id: signUpData.user.id,
+                grade,
+                class: cls,
+                number: num,
+                name
+            };
+
+            const { error: profileError } = await sb.from('users').insert(newUser);
+
+            if (profileError) {
+                console.error('프로필 저장 실패:', profileError);
+                await sb.auth.signOut();
+                showAlert('계정은 생성됐지만 학생 정보 저장에 실패했습니다.');
+                return;
+            }
+
+            dbCache.currentUser = newUser;
+            saveLocalCache();
+
+            showAlert('회원가입 완료! 소속 조직에 가입하거나 생성해주세요.');
+            showOrgScreen();
+        }
+
+        function checkOrgMembership() {
+            let joined = dbCache.orgs.find(o => o.members.some(m => m.name === dbCache.currentUser.name));
+            if (joined) {
+                dbCache.currentOrgCode = joined.code;
+                saveLocalCache();
+                showMainApp();
+            } else {
+                showOrgScreen();
+            }
+        }
+
+        function createOrganization() {
+            const name = document.getElementById('create-org-name').value.trim();
+            const code = document.getElementById('create-org-code').value.trim();
+
+            if (!name || !code) {
+                showAlert('조직 명칭과 코드를 모두 입력해주세요.');
+                return;
+            }
+
+            const hasEnglishLetter = /[a-zA-Z]/.test(code);
+            if (!hasEnglishLetter) {
+                showAlert('조직 코드는 반드시 영문(알파벳)을 1글자 이상 포함해야 합니다.');
+                return;
+            }
+
+            if (dbCache.orgs.some(o => o.code === code)) {
+                showAlert('이미 존재하는 조직 코드입니다.');
+                return;
+            }
+
+            const defaultReasons = [
+                "휴대폰 사용 위반",
+                "수업 태도 불량",
+                "교내 흡연"
+            ];
+
+            const newOrg = {
+                code,
+                name,
+                imageUrl: '',
+                reasons: defaultReasons,
+                members: [{ name: dbCache.currentUser.name, role: '단장' }]
+            };
+
+            dbCache.orgs.push(newOrg);
+            dbCache.currentOrgCode = code;
+            saveLocalCache();
+            syncOrgToFirestore(newOrg);
+            showAlert(`'${name}' 조직이 생성되었으며, 단장으로 임명되었습니다.`);
+            showMainApp();
+        }
+
+        function joinOrganization() {
+            const code = document.getElementById('join-org-code').value.trim();
+            const org = dbCache.orgs.find(o => o.code === code);
+
+            if (!org) {
+                showAlert('해당 코드를 가진 조직을 찾을 수 없습니다.');
+                return;
+            }
+
+            if (!org.reasons) {
+                org.reasons = [
+                    "휴대폰 사용 위반",
+                    "수업 태도 불량",
+                    "교내 흡연"
+                ];
+            }
+
+            if (!org.members.some(m => m.name === dbCache.currentUser.name)) {
+                org.members.push({ name: dbCache.currentUser.name, role: '회원' });
+            }
+
+            dbCache.currentOrgCode = code;
+            saveLocalCache();
+            syncOrgToFirestore(org);
+            showAlert(`'${org.name}' 조직에 가입되었습니다.`);
+            showMainApp();
+        }
+
+        async function logoutToAuth() {
+            const sb = window.appState?.supabase;
+            if (sb) await sb.auth.signOut();
+            dbCache.currentUser = null;
+            dbCache.currentOrgCode = null;
+            saveLocalCache();
+            showAuthScreen();
+        }
+
+        function showAuthScreen() {
+            document.getElementById('auth-screen').classList.remove('hidden');
+            document.getElementById('org-screen').classList.add('hidden');
+            document.getElementById('main-app').classList.add('hidden');
+        }
+
+        function showOrgScreen() {
+            document.getElementById('auth-screen').classList.add('hidden');
+            document.getElementById('org-screen').classList.remove('hidden');
+            document.getElementById('main-app').classList.add('hidden');
+        }
+
+        function showMainApp() {
+            document.getElementById('auth-screen').classList.add('hidden');
+            document.getElementById('org-screen').classList.add('hidden');
+            document.getElementById('main-app').classList.remove('hidden');
+
+            const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
+            const memberInfo = org ? org.members.find(m => m.name === dbCache.currentUser.name) : null;
+            const role = memberInfo ? memberInfo.role : '회원';
+
+            document.getElementById('header-org-name').innerText = org ? org.name : '학생회 조직';
+            document.getElementById('header-org-code-display').innerText = org ? org.code : '';
+            document.getElementById('header-user-badge').innerText = `${dbCache.currentUser.name} (${role})`;
+
+            const avatarContainer = document.getElementById('header-org-avatar');
+            if (org && org.imageUrl) {
+                avatarContainer.innerHTML = `<img src="${org.imageUrl}" class="w-full h-full object-cover">`;
+            } else {
+                avatarContainer.innerHTML = `<i class="fa-solid fa-school text-white text-sm"></i>`;
+            }
+
+            populateDisciplineReasonsDropdown();
+            switchTab('home');
+        }
+
+        function uploadOrgImage(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
+                if (org) {
+                    org.imageUrl = e.target.result;
+                    syncOrgToFirestore(org);
+                    showMainApp();
+                    document.getElementById('admin-org-preview').src = org.imageUrl;
+                    showAlert('조직 대표 이미지가 성공적으로 변경되었습니다.');
+                }
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function populateDisciplineReasonsDropdown() {
+            const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
+            const sel = document.getElementById('target-reason');
+            if (!sel) return;
+
+            const reasons = (org && org.reasons) ? org.reasons : [
+                "휴대폰 사용 위반",
+                "수업 태도 불량",
+                "교내 흡연"
+            ];
+
+            sel.innerHTML = reasons.map(r => `<option value="${r}">${r}</option>`).join('');
+        }
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                if (btn.getAttribute('data-tab') === tab) {
+                    btn.classList.remove('text-slate-400');
+                    btn.classList.add('text-indigo-600', 'font-bold');
+                } else {
+                    btn.classList.remove('text-indigo-600', 'font-bold');
+                    btn.classList.add('text-slate-400');
+                }
+            });
+
+            const container = document.getElementById('main-content');
+            const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
+            const member = org ? org.members.find(m => m.name === dbCache.currentUser.name) : null;
+            const role = member ? member.role : '회원';
+            const isAdmin = (role === '단장' || role === '전교회장' || role === '부단장' || role === '전교부회장');
+
+            if (tab === 'home') {
+                container.innerHTML = `
+                    <div class="space-y-4">
+                        <div class="bg-gradient-to-r from-indigo-500 to-violet-600 text-white p-5 rounded-3xl shadow-lg space-y-1">
+                            <h2 class="text-lg font-bold">환영합니다, ${dbCache.currentUser.name} 님!</h2>
+                            <p class="text-xs text-indigo-100">소속: ${org ? org.name : '없음'} (${role})</p>
+                            <p class="text-[11px] text-yellow-200 mt-1 font-mono">조직 코드: <b>${org ? org.code : ''}</b></p>
+                        </div>
+                        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+                            <h3 class="text-xs font-bold text-indigo-600"><i class="fa-solid fa-calendar-check mr-1.5"></i> 다가오는 회의 및 공지 일정</h3>
+                            <div id="home-meeting-preview" class="text-xs text-slate-600">추가 일정 없음</div>
+                        </div>
+                        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+                            <h3 class="text-xs font-bold text-slate-700"><i class="fa-solid fa-calendar-day mr-1.5"></i> 이번 주 나의 선도 지도 일정</h3>
+                            <div id="home-duty-preview" class="text-xs text-slate-500">배정된 선도 지도 일정을 확인하세요.</div>
+                            <button onclick="openModal('swap-modal')" class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-indigo-600 rounded-xl font-bold text-xs transition mt-1">대타(스왑) 신청하기</button>
+                        </div>
+                        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                            <h3 class="text-xs font-bold text-slate-700"><i class="fa-solid fa-chart-pie mr-1.5"></i> 나의 활동 대시보드 (1회당 1시간)</h3>
+                            <div class="grid grid-cols-3 gap-2 text-center pt-1">
+                                <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                                    <span class="text-[10px] text-slate-400 block font-semibold">단속 건수</span>
+                                    <span id="dash-crack" class="text-sm font-bold text-indigo-600">0건</span>
+                                </div>
+                                <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                                    <span class="text-[10px] text-slate-400 block font-semibold">회의 참석</span>
+                                    <span id="dash-meeting" class="text-sm font-bold text-emerald-600">0회</span>
+                                </div>
+                                <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                                    <span class="text-[10px] text-slate-400 block font-semibold">활동 시간</span>
+                                    <span id="dash-time" class="text-sm font-bold text-amber-600">0시간</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                updateHomeDashboardData();
+            } else if (tab === 'records') {
+                container.innerHTML = `
+                    <div class="space-y-4">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <h2 class="text-base font-bold text-slate-800">선도 단속 관리</h2>
+                                <p class="text-[11px] text-slate-500">날짜별·세션별 및 누적 학생 관리</p>
+                            </div>
+                            <button onclick="openDisciplineModalForAdd()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3.5 py-2 rounded-xl font-bold transition shadow-sm">+ 기록 추가</button>
+                        </div>
+                        
+                        <!-- Sub-tab Selector -->
+                        <div class="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-xl text-xs font-bold">
+                            <button onclick="setRecordsSubTab('dates')" id="subtab-dates-btn" class="py-2 rounded-lg transition ${recordsSubTab==='dates'?'bg-white text-indigo-600 shadow-sm':'text-slate-600'}">날짜·세션별 내역</button>
+                            <button onclick="setRecordsSubTab('cumulative')" id="subtab-cum-btn" class="py-2 rounded-lg transition ${recordsSubTab==='cumulative'?'bg-white text-indigo-600 shadow-sm':'text-slate-600'}">학생별 누적 현황 및 엑셀</button>
+                        </div>
+
+                        <div id="records-subcontent" class="space-y-3"></div>
+                    </div>
+                `;
+                renderDisciplineList();
+            } else if (tab === 'duties') {
+                container.innerHTML = `
+                    <div class="space-y-4">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <h2 class="text-base font-bold text-slate-800">선도 지도 일정 관리</h2>
+                                <p class="text-[11px] text-slate-500">매주 월요일 ~ 금요일 당번 관리 및 스왑</p>
+                            </div>
+                            ${isAdmin ? `<button onclick="openDutyModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3.5 py-2 rounded-xl font-bold transition shadow-sm">+ 일정 배정</button>` : ''}
+                        </div>
+                        <div id="duty-schedule-list" class="space-y-3"></div>
+                        <div class="border-t border-slate-200 pt-3">
+                            <h3 class="text-xs font-bold text-slate-700 mb-2">대타(스왑) 신청 현황</h3>
+                            <div id="swap-list" class="space-y-3"></div>
+                        </div>
+                    </div>
+                `;
+                renderDutyScheduleList();
+                renderSwapList();
+            } else if (tab === 'meetings') {
+                container.innerHTML = `
+                    <div class="space-y-4">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <h2 class="text-base font-bold text-slate-800">회의 소집 및 출석</h2>
+                                <p class="text-[11px] text-slate-500">정기 회의 및 RSVP 투표</p>
+                            </div>
+                            ${isAdmin ? `<button onclick="openModal('meeting-modal')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3.5 py-2 rounded-xl font-bold transition shadow-sm">+ 회의 소집</button>` : ''}
+                        </div>
+                        <div id="meeting-list" class="space-y-3"></div>
+                    </div>
+                `;
+                renderMeetingList();
+            } else if (tab === 'manual') {
+                container.innerHTML = `
+                    <div class="space-y-4 text-xs">
+                        <h2 class="text-base font-bold text-slate-800">선도 업무 매뉴얼</h2>
+                        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+                            <h3 class="font-bold text-rose-600"><i class="fa-solid fa-triangle-exclamation mr-1"></i> 주요 단속 규정 및 예외 사항</h3>
+                            <p class="text-slate-600 leading-relaxed">
+                                1. <b>사복 착용 단속</b><br>
+                                - 단, 상의 사복 착용 시 <b>교복 또는 체육복 겉옷(후드집업, 점퍼 등)을 소지</b>하고 있다면 통과 처리합니다.<br><br>
+                                2. <b>슬리퍼 및 신발 규정</b><br>
+                                - 슬리퍼, 크록스, 어그 부츠 착용 금지.<br><br>
+                                3. <b>명찰 미부착 규정</b><br>
+                                - 규정된 명찰 상시 패용 여부 확인.
+                            </p>
+                        </div>
+                        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+                            <h3 class="font-bold text-emerald-600"><i class="fa-solid fa-circle-check mr-1"></i> 당일 지도 체크리스트</h3>
+                            <p class="text-slate-600 leading-relaxed">
+                                - 교문 지도 시 단정한 학생회 복장 착용<br>
+                                - 지각생 및 규정 위반자 공정하게 기록<br>
+                                - 위반 사유 정확히 확인 후 앱에 즉시 입력
+                            </p>
+                        </div>
+                    </div>
+                `;
+            } else if (tab === 'announcements') {
+                container.innerHTML = `
+                    <div class="space-y-4">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <h2 class="text-base font-bold text-slate-800">전체 공지사항</h2>
+                                <p class="text-[11px] text-slate-500">학생회 공식 공지 게시판</p>
+                            </div>
+                            ${isAdmin ? `<button onclick="openModal('notice-modal')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3.5 py-2 rounded-xl font-bold transition shadow-sm">+ 공지 등록</button>` : ''}
+                        </div>
+                        <div id="notice-list" class="space-y-3"></div>
+                    </div>
+                `;
+                renderNoticeList();
+            } else if (tab === 'settings') {
+                container.innerHTML = `
+                    <div class="space-y-4 text-xs">
+                        <h2 class="text-base font-bold text-slate-800">설정 및 관리</h2>
+                        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                            <h3 class="font-bold text-slate-700"><i class="fa-solid fa-user mr-1"></i> 내 정보 수정 (학년 / 반 / 번호)</h3>
+                            <div class="space-y-2">
+                                <div>
+                                    <label class="block text-[11px] font-semibold text-slate-600 mb-1">학년</label>
+                                    <select id="settings-grade" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold">
+                                        <option value="1학년" ${dbCache.currentUser.grade==='1학년'?'selected':''}>1학년</option>
+                                        <option value="2학년" ${dbCache.currentUser.grade==='2학년'?'selected':''}>2학년</option>
+                                        <option value="3학년" ${dbCache.currentUser.grade==='3학년'?'selected':''}>3학년</option>
+                                    </select>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label class="block text-[11px] font-semibold text-slate-600 mb-1">반</label>
+                                        <select id="settings-class" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold">
+                                            <option value="1반" ${dbCache.currentUser.class==='1반'?'selected':''}>1반</option>
+                                            <option value="2반" ${dbCache.currentUser.class==='2반'?'selected':''}>2반</option>
+                                            <option value="3반" ${dbCache.currentUser.class==='3반'?'selected':''}>3반</option>
+                                            <option value="4반" ${dbCache.currentUser.class==='4반'?'selected':''}>4반</option>
+                                            <option value="5반" ${dbCache.currentUser.class==='5반'?'selected':''}>5반</option>
+                                            <option value="6반" ${dbCache.currentUser.class==='6반'?'selected':''}>6반</option>
+                                            <option value="7반" ${dbCache.currentUser.class==='7반'?'selected':''}>7반</option>
+                                            <option value="8반" ${dbCache.currentUser.class==='8반'?'selected':''}>8반</option>
+                                            <option value="9반" ${dbCache.currentUser.class==='9반'?'selected':''}>9반</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-[11px] font-semibold text-slate-600 mb-1">번호</label>
+                                        <select id="settings-number" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl font-bold">
+                                            ${Array.from({length: 25}, (_, i) => `<option value="${i+1}번" ${dbCache.currentUser.number===(i+1+'번')||dbCache.currentUser.number===(i+1)?'selected':''}>${i+1}번</option>`).join('')}
+                                        </select>
+                                    </div>
+                                </div>
+                                <button onclick="updateUserProfile()" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition shadow-sm mt-1">정보 수정 저장</button>
+                            </div>
+                        </div>
+
+                        ${isAdmin ? `
+                        <div class="bg-rose-50 p-4 rounded-2xl border border-rose-100 shadow-sm space-y-2">
+                            <h3 class="font-bold text-rose-600"><i class="fa-solid fa-shield-dog mr-1"></i> 조직 관리 및 설정 (리더진 전용)</h3>
+                            <p class="text-slate-600">조직 대표 이미지, 선도 위반 사유(추가/수정/삭제) 및 조직원 역할을 관리합니다.</p>
+                            <button onclick="openAdminModal()" class="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold transition shadow-sm">조직 관리 패널 열기</button>
+                        </div>` : ''}
+
+                        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+                            <h3 class="font-bold text-slate-700"><i class="fa-solid fa-mobile-screen mr-1"></i> 홈 화면 앱 설치 가이드</h3>
+                            <p class="text-slate-600 leading-relaxed">사파리(Safari) 또는 크롬에서 공유 버튼을 눌러 <b>[홈 화면에 추가]</b>를 하시면 클라우드 연동 앱처럼 간편하게 사용할 수 있습니다.</p>
+                        </div>
+
+                        <div class="space-y-2 pt-2">
+                            <button onclick="openWithdrawModal()" class="w-full py-3 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-xl font-bold transition">현재 조직 탈퇴하기</button>
+                            <button onclick="logoutToAuth()" class="w-full py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold transition">신원 로그아웃</button>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function setRecordsSubTab(sub) {
+            recordsSubTab = sub;
+            switchTab('records');
+        }
+
+        async function updateUserProfile() {
+            const grade = document.getElementById('settings-grade').value;
+            const cls = document.getElementById('settings-class').value;
+            const num = document.getElementById('settings-number').value;
+
+            dbCache.currentUser.grade = grade;
+            dbCache.currentUser.class = cls;
+            dbCache.currentUser.number = num;
+
+            const idx = dbCache.users.findIndex(u => u.name === dbCache.currentUser.name);
+            if (idx !== -1) {
+                dbCache.users[idx] = dbCache.currentUser;
+            }
+
+            saveLocalCache();
+
+            const sb = requireSupabase();
+            if (sb && dbCache.currentUser.id) {
+                const { error } = await sb.from('users').update({
+                    grade,
+                    class: cls,
+                    number: num
+                }).eq('id', dbCache.currentUser.id);
+
+                if (error) {
+                    console.error('프로필 수정 실패:', error);
+                    showAlert('내 정보 저장에 실패했습니다.');
+                    return;
+                }
+            }
+
+            showAlert('내 정보가 성공적으로 수정되었습니다.');
+            showMainApp();
+        }
+
+        function openWithdrawModal() {
+            document.getElementById('withdraw-confirm-modal').classList.remove('hidden');
+        }
+
+        function closeWithdrawModal() {
+            document.getElementById('withdraw-confirm-modal').classList.add('hidden');
+        }
+
+        function executeWithdrawal() {
+            closeWithdrawModal();
+            const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
+            if (org) {
+                org.members = org.members.filter(m => m.name !== dbCache.currentUser.name);
+                syncOrgToFirestore(org);
+            }
+            dbCache.currentOrgCode = null;
+            saveLocalCache();
+            showAlert('조직에서 탈퇴하였습니다.');
+            showOrgScreen();
+        }
+
+        function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
+        function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+        function openDisciplineModalForAdd() {
+            document.getElementById('discipline-modal-title').innerText = '선도 단속 기록 작성';
+            document.getElementById('edit-record-id').value = '';
+            document.getElementById('target-name').value = '';
+            document.getElementById('target-memo').value = '';
+            
+            const todayStr = new Date().toISOString().slice(0, 10);
+            document.getElementById('target-date').value = todayStr;
+            document.getElementById('target-session-type').selectedIndex = 0;
+            document.getElementById('target-grade').selectedIndex = 0;
+            document.getElementById('target-class-sel').selectedIndex = 0;
+            document.getElementById('target-num-sel').selectedIndex = 0;
+            openModal('discipline-modal');
+        }
+
+        function openDutyModal() {
+            const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
+            const select = document.getElementById('duty-member-select');
+            if (org && select) {
+                select.innerHTML = org.members.map(m => `<option value="${m.name} (${m.role})">${m.name} (${m.role})</option>`).join('');
+            }
+            openModal('duty-modal');
+        }
+
+        function toggleMeetingCustomLoc(val) {
+            const div = document.getElementById('meeting-custom-loc-div');
+            if (val === '기타') div.classList.remove('hidden');
+            else div.classList.add('hidden');
+        }
+
+        function saveDisciplineRecord() {
+            const editId = document.getElementById('edit-record-id').value;
+            const recordDate = document.getElementById('target-date').value || new Date().toISOString().slice(0, 10);
+            const sessionType = document.getElementById('target-session-type').value;
+            const grade = document.getElementById('target-grade').value;
+            const cls = document.getElementById('target-class-sel').value;
+            const num = document.getElementById('target-num-sel').value;
+            const name = document.getElementById('target-name').value.trim();
+            const reason = document.getElementById('target-reason').value;
+            const memo = document.getElementById('target-memo').value.trim();
+
+            if (!name) {
+                showAlert('학생 이름을 입력해주세요.');
+                return;
+            }
+
+            const targetKey = `${grade}_${cls}_${num}_${name}`;
+            const list = dbCache.disciplines[dbCache.currentOrgCode] || [];
+
+            if (editId) {
+                const rec = list.find(d => d.id == editId);
+                if (rec) {
+                    rec.date = recordDate;
+                    rec.sessionType = sessionType;
+                    rec.grade = grade;
+                    rec.classVal = cls;
+                    rec.number = num;
+                    rec.name = name;
+                    rec.targetKey = targetKey;
+                    rec.reason = reason;
+                    rec.memo = memo;
+                }
+                showAlert('단속 기록이 수정되었습니다.');
+            } else {
+                const record = {
+                    id: Date.now(),
+                    date: recordDate,
+                    sessionType: sessionType,
+                    author: dbCache.currentUser.name,
+                    grade,
+                    classVal: cls,
+                    number: num,
+                    name,
+                    targetKey,
+                    reason,
+                    memo
+                };
+                if (!dbCache.disciplines[dbCache.currentOrgCode]) dbCache.disciplines[dbCache.currentOrgCode] = [];
+                dbCache.disciplines[dbCache.currentOrgCode].unshift(record);
+
+                const currentCount = dbCache.disciplines[dbCache.currentOrgCode].filter(d => d.targetKey === targetKey).length;
+                if (currentCount === 4) {
+                    showAlert('5회 이상 누적 시 생활교육위원회에 회부됩니다', '⚠️ 4회 누적 경고 안내');
+                } else {
+                    showAlert('단속 기록이 저장되었습니다.');
+                }
+            }
+
+            syncSubColToFirestore('disciplines', dbCache.currentOrgCode, dbCache.disciplines[dbCache.currentOrgCode]);
+
+            document.getElementById('edit-record-id').value = '';
+            document.getElementById('target-name').value = '';
+            document.getElementById('target-memo').value = '';
+            document.getElementById('target-date').value = new Date().toISOString().slice(0, 10);
+            document.getElementById('target-session-type').selectedIndex = 0;
+            document.getElementById('target-grade').selectedIndex = 0;
+            document.getElementById('target-class-sel').selectedIndex = 0;
+            document.getElementById('target-num-sel').selectedIndex = 0;
+
+            closeModal('discipline-modal');
+            closeModal('discipline-detail-modal');
+            if (currentTab === 'records') renderDisciplineList();
+        }
+
+        function renderDisciplineList() {
+            const container = document.getElementById('records-subcontent');
+            if (!container) return;
+            const list = dbCache.disciplines[dbCache.currentOrgCode] || [];
+
+            const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
+            const member = org ? org.members.find(m => m.name === dbCache.currentUser.name) : null;
+            const role = member ? member.role : '회원';
+            const isAdmin = (role === '단장' || role === '전교회장' || role === '부단장' || role === '전교부회장');
+
+            if (recordsSubTab === 'dates') {
+                if (list.length === 0) {
+                    container.innerHTML = '<p class="text-center text-xs text-slate-400 py-8">기록된 단속 내역이 없습니다.</p>';
+                    return;
+                }
+
+                const dateGroups = {};
+                list.forEach(d => {
+                    const dt = d.date || '날짜 미지정';
+                    const st = d.sessionType || '아침지도';
+                    if (!dateGroups[dt]) dateGroups[dt] = { '아침지도': [], '점심지도': [] };
+                    if (!dateGroups[dt][st]) dateGroups[dt][st] = [];
+                    dateGroups[dt][st].push(d);
+                });
+
+                const sortedDates = Object.keys(dateGroups).sort().reverse();
+
+                container.innerHTML = `
+                    ${isAdmin ? `
+                    <div class="flex justify-end mb-2">
+                        <button onclick="bulkDeleteAllDisciplines()" class="bg-rose-50 hover:bg-rose-100 text-rose-600 text-[11px] px-3 py-1.5 rounded-xl font-bold transition">
+                            <i class="fa-solid fa-trash-can mr-1"></i> 전체 단속 기록 일괄 삭제
+                        </button>
+                    </div>` : ''}
+                    <div class="space-y-4">
+                        ${sortedDates.map(dt => `
+                            <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                                <h3 class="font-bold text-slate-800 text-sm border-b border-slate-100 pb-2 flex items-center">
+                                    <i class="fa-regular fa-calendar-days text-indigo-600 mr-2"></i> ${dt} 단속 일지
+                                </h3>
+                                <div class="space-y-3">
+                                    ${['아침지도', '점심지도'].map(session => {
+                                        const sessionItems = dateGroups[dt][session] || [];
+                                        if (sessionItems.length === 0) return '';
+                                        return `
+                                            <div class="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-2">
+                                                <div class="flex justify-between items-center">
+                                                    <span class="px-2.5 py-1 bg-indigo-50 text-indigo-700 font-bold rounded-lg text-xs">${session} (${sessionItems.length}명)</span>
+                                                    ${isAdmin ? `
+                                                    <button onclick="bulkDeleteSession('${dt}', '${session}')" class="text-[10px] text-rose-500 hover:underline font-bold">
+                                                        <i class="fa-solid fa-trash mr-0.5"></i> ${session} 일괄삭제
+                                                    </button>` : ''}
+                                                </div>
+                                                <div class="space-y-1.5 pt-1">
+                                                    ${sessionItems.map(item => `
+                                                        <div class="bg-white p-2.5 rounded-xl border border-slate-200/60 flex justify-between items-center text-xs">
+                                                            <div>
+                                                                <span class="font-bold text-slate-800">${item.grade} ${item.classVal} ${item.number} ${item.name}</span>
+                                                                <p class="text-[11px] text-slate-500 mt-0.5">사유: ${item.reason}</p>
+                                                            </div>
+                                                            <div class="text-right">
+                                                                <span class="text-[10px] text-slate-400">단속: ${item.author}</span>
+                                                            </div>
+                                                        </div>
+                                                    `).join('')}
+                                                </div>
+                                            </div>
+                                        `;
+                                    }).join('')}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            } else {
+                if (list.length === 0) {
+                    container.innerHTML = '<p class="text-center text-xs text-slate-400 py-8">기록된 단속 내역이 없습니다.</p>';
+                    return;
+                }
+
+                const grouped = {};
+                list.forEach(d => {
+                    const key = d.targetKey || `${d.grade || '1학년'}_${d.classVal || '1반'}_${d.number || '1번'}_${d.name || '학생'}`;
+                    if (!grouped[key]) {
+                        grouped[key] = {
+                            targetKey: key,
+                            grade: d.grade || '1학년',
+                            classVal: d.classVal || '1반',
+                            number: d.number || '1번',
+                            name: d.name || '학생',
+                            records: []
+                        };
+                    }
+                    grouped[key].records.push(d);
+                });
+
+                const sortedGroups = Object.values(grouped).sort((a, b) => {
+                    let gA = parseInt(a.grade) || 1;
+                    let gB = parseInt(b.grade) || 1;
+                    if (gA !== gB) return gA - gB;
+                    let cA = parseInt(a.classVal) || 1;
+                    let cB = parseInt(b.classVal) || 1;
+                    if (cA !== cB) return cA - cB;
+                    let nA = parseInt(a.number) || 1;
+                    let nB = parseInt(b.number) || 1;
+                    return nA - nB;
+                });
+
+                container.innerHTML = `
+                    <div class="flex justify-between items-center bg-indigo-50 p-3 rounded-xl border border-indigo-100 text-xs text-indigo-900 mb-2">
+                        <span>학생별 누적 횟수 중심 엑셀(CSV) 다운로드</span>
+                        <button onclick="exportToCSV()" class="bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold text-[11px]">CSV 다운로드</button>
+                    </div>
+                    <div class="space-y-3">
+                        ${sortedGroups.map(g => `
+                            <div onclick="openDisciplineDetail('${g.targetKey}')" class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex justify-between items-center cursor-pointer hover:border-indigo-500 transition text-xs">
+                                <div class="space-y-1">
+                                    <div class="font-bold text-slate-800 text-sm">${g.grade} ${g.classVal} ${g.number} ${g.name}</div>
+                                    <p class="text-slate-500 text-[11px]">클릭하여 상세 위반 기록 확인 및 관리</p>
+                                </div>
+                                <div class="text-right">
+                                    <span class="px-3 py-1 rounded-xl bg-indigo-50 text-indigo-600 font-bold text-xs shadow-sm">누적 ${g.records.length}회</span>
+                                    <div class="text-[10px] text-slate-400 mt-1">상세보기 &gt;</div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+        }
+
+        function bulkDeleteSession(date, sessionType) {
+            const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
+            const member = org ? org.members.find(m => m.name === dbCache.currentUser.name) : null;
+            const role = member ? member.role : '회원';
+            const isAdmin = (role === '단장' || role === '전교회장' || role === '부단장' || role === '전교부회장');
+
+            if (!isAdmin) {
+                showAlert('관리자만 일괄 삭제할 수 있습니다.');
+                return;
+            }
+
+            pendingBulkDelete = { type: 'session', date, sessionType };
+            document.getElementById('bulk-delete-msg').innerText = `정말 ${date} ${sessionType} 기록을 모두 일괄 삭제하시겠습니까?`;
+            document.getElementById('bulk-delete-confirm-modal').classList.remove('hidden');
+        }
+
+        function bulkDeleteAllDisciplines() {
+            const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
+            const member = org ? org.members.find(m => m.name === dbCache.currentUser.name) : null;
+            const role = member ? member.role : '회원';
+            const isAdmin = (role === '단장' || role === '전교회장' || role === '부단장' || role === '전교부회장');
+
+            if (!isAdmin) {
+                showAlert('관리자만 일괄 삭제할 수 있습니다.');
+                return;
+            }
+
+            pendingBulkDelete = { type: 'all' };
+            document.getElementById('bulk-delete-msg').innerText = '정말 모든 선도 단속 기록을 일괄 삭제하시겠습니까?';
+            document.getElementById('bulk-delete-confirm-modal').classList.remove('hidden');
+        }
+
+        function closeBulkDeleteModal() {
+            pendingBulkDelete = null;
+            document.getElementById('bulk-delete-confirm-modal').classList.add('hidden');
+        }
+
+        function executeBulkDelete() {
+            if (!pendingBulkDelete) return;
+            const { type, date, sessionType } = pendingBulkDelete;
+            closeBulkDeleteModal();
+
+            let list = dbCache.disciplines[dbCache.currentOrgCode] || [];
+            if (type === 'session') {
+                dbCache.disciplines[dbCache.currentOrgCode] = list.filter(d => !(d.date === date && d.sessionType === sessionType));
+                showAlert('해당 세션의 단속 기록이 일괄 삭제되었습니다.');
+            } else if (type === 'all') {
+                dbCache.disciplines[dbCache.currentOrgCode] = [];
+                showAlert('모든 선도 단속 기록이 일괄 삭제되었습니다.');
+            }
+            syncSubColToFirestore('disciplines', dbCache.currentOrgCode, dbCache.disciplines[dbCache.currentOrgCode]);
+            renderDisciplineList();
+        }
+
+        function openDisciplineDetail(targetKey) {
+            const list = dbCache.disciplines[dbCache.currentOrgCode] || [];
+            const studentRecords = list.filter(d => (d.targetKey || `${d.grade}_${d.classVal}_${d.number}_${d.name}`) === targetKey);
+            if (studentRecords.length === 0) return;
+
+            const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
+            const member = org ? org.members.find(m => m.name === dbCache.currentUser.name) : null;
+            const role = member ? member.role : '회원';
+            const isAdmin = (role === '단장' || role === '전교회장' || role === '부단장' || role === '전교부회장');
+
+            const sample = studentRecords[0];
+            const studentTitle = `${sample.grade} ${sample.classVal} ${sample.number} ${sample.name}`;
+            const contentDiv = document.getElementById('discipline-detail-content');
+            
+            contentDiv.innerHTML = `
+                <div class="border-b border-slate-100 pb-3">
+                    <h3 class="text-base font-bold text-slate-800">${studentTitle}</h3>
+                    <p class="text-xs text-slate-500">총 누적 위반 횟수: <span class="text-indigo-600 font-bold">${studentRecords.length}회</span></p>
+                </div>
+                <div class="space-y-3 max-h-[55vh] overflow-y-auto no-scrollbar pt-1">
+                    ${studentRecords.map((r, idx) => `
+                        <div class="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-1.5 text-xs">
+                            <div class="flex justify-between items-center font-bold text-slate-800">
+                                <span class="text-indigo-600">${r.sessionType || '아침지도'} (${r.date || '날짜 미지정'})</span>
+                                <span class="text-[10px] text-slate-400">단속자: ${r.author}</span>
+                            </div>
+                            <p class="font-semibold text-slate-700">사유: ${r.reason}</p>
+                            ${r.memo ? `<p class="text-slate-500 text-[11px]">메모: ${r.memo}</p>` : ''}
+                            ${isAdmin ? `
+                            <div class="flex gap-2 pt-2 border-t border-slate-200/60">
+                                <button onclick="editDiscipline(${r.id})" class="flex-1 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-bold rounded-lg transition text-center">수정</button>
+                                <button onclick="deleteDiscipline(${r.id}, '${targetKey}')" class="flex-1 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-lg transition text-center">삭제</button>
+                            </div>` : ''}
+                        </div>
+                    `).join('')}
+                    ${studentRecords.length === 4 ? `
+                        <div class="bg-amber-50 border border-amber-300 text-amber-800 p-3 rounded-2xl text-xs font-bold text-center">
+                            ⚠️️ 5회 이상 누적 시 생활교육위원회에 회부됩니다
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+            openModal('discipline-detail-modal');
+        }
+
+        function editDiscipline(id) {
+            const list = dbCache.disciplines[dbCache.currentOrgCode] || [];
+            const r = list.find(d => d.id == id);
+            if (!r) return;
+
+            document.getElementById('discipline-modal-title').innerText = '선도 단속 기록 수정';
+            document.getElementById('edit-record-id').value = r.id;
+            document.getElementById('target-date').value = r.date || new Date().toISOString().slice(0, 10);
+            document.getElementById('target-session-type').value = r.sessionType || '아침지도';
+            document.getElementById('target-grade').value = r.grade || '1학년';
+            document.getElementById('target-class-sel').value = r.classVal || '1반';
+            document.getElementById('target-num-sel').value = r.number || '1번';
+            document.getElementById('target-name').value = r.name || '';
+            document.getElementById('target-reason').value = r.reason || '';
+            document.getElementById('target-memo').value = r.memo || '';
+
+            closeModal('discipline-detail-modal');
+            openModal('discipline-modal');
+        }
+
+        function deleteDiscipline(id, targetKey) {
+            let list = dbCache.disciplines[dbCache.currentOrgCode] || [];
+            dbCache.disciplines[dbCache.currentOrgCode] = list.filter(d => d.id != id);
+            syncSubColToFirestore('disciplines', dbCache.currentOrgCode, dbCache.disciplines[dbCache.currentOrgCode]);
+
+            showAlert('단속 기록이 삭제되었습니다.');
+            closeModal('discipline-detail-modal');
+            
+            const remaining = dbCache.disciplines[dbCache.currentOrgCode].filter(d => (d.targetKey || `${d.grade}_${d.classVal}_${d.number}_${d.name}`) === targetKey);
+            if (remaining.length > 0) {
+                openDisciplineDetail(targetKey);
+            }
+            if (currentTab === 'records') renderDisciplineList();
+        }
+
+        function exportToCSV() {
+            const list = dbCache.disciplines[dbCache.currentOrgCode] || [];
+            if (list.length === 0) {
+                showAlert('내보낼 단속 기록이 없습니다.');
+                return;
+            }
+            
+            const grouped = {};
+            list.forEach(d => {
+                const key = d.targetKey || `${d.grade || '1학년'}_${d.classVal || '1반'}_${d.number || '1번'}_${d.name || '학생'}`;
+                if (!grouped[key]) {
+                    grouped[key] = {
+                        grade: d.grade || '1학년',
+                        classVal: d.classVal || '1반',
+                        number: d.number || '1번',
+                        name: d.name || '학생',
+                        count: 0
+                    };
+                }
+                grouped[key].count++;
+            });
+
+            const sorted = Object.values(grouped).sort((a, b) => {
+                let gA = parseInt(a.grade) || 1;
+                let gB = parseInt(b.grade) || 1;
+                if (gA !== gB) return gA - gB;
+                let cA = parseInt(a.classVal) || 1;
+                let cB = parseInt(b.classVal) || 1;
+                if (cA !== cB) return cA - cB;
+                let nA = parseInt(a.number) || 1;
+                let nB = parseInt(b.number) || 1;
+                return nA - nB;
+            });
+
+            let csv = '\uFEFF학년,반,번호,이름,누적단속횟수\n';
+            sorted.forEach(s => {
+                csv += `"${s.grade}","${s.classVal}","${s.number}","${s.name}","누적 ${s.count}회"\n`;
+            });
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `선도단속누적정리_${new Date().toISOString().slice(0,10)}.csv`;
+            a.click();
+        }
+
+        function submitDutySchedule() {
+            const day = document.getElementById('duty-day').value;
+            const dutyType = document.getElementById('duty-type').value;
+            const memberName = document.getElementById('duty-member-select').value;
+            const time = document.getElementById('duty-time').value;
+
+            if (!memberName || !time) {
+                showAlert('담당 학생과 시간을 모두 선택해주세요.');
+                return;
+            }
+
+            const duty = { id: Date.now(), day, dutyType, memberName, time };
+            if (!dbCache.duties[dbCache.currentOrgCode]) dbCache.duties[dbCache.currentOrgCode] = [];
+            dbCache.duties[dbCache.currentOrgCode].unshift(duty);
+            syncSubColToFirestore('duties', dbCache.currentOrgCode, dbCache.duties[dbCache.currentOrgCode]);
+            closeModal('duty-modal');
+            if (currentTab === 'duties') renderDutyScheduleList();
+            showAlert('선도 지도 일정이 성공적으로 배정되었습니다.');
+        }
+
+        function renderDutyScheduleList() {
+            const container = document.getElementById('duty-schedule-list');
+            if (!container) return;
+            const list = dbCache.duties[dbCache.currentOrgCode] || [];
+            if (list.length === 0) {
+                container.innerHTML = '<p class="text-center text-xs text-slate-400 py-6">배정된 선도 지도 일정이 없습니다.</p>';
+                return;
+            }
+            container.innerHTML = list.map(d => `
+                <div class="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm flex justify-between items-center text-xs">
+                    <div>
+                        <span class="px-2 py-1 bg-indigo-50 text-indigo-600 font-bold rounded-lg mr-1">${d.day}</span>
+                        <span class="px-2 py-1 bg-amber-50 text-amber-700 font-bold rounded-lg mr-2">${d.dutyType || '아침지도'}</span>
+                        <b>담당: ${d.memberName}</b>
+                    </div>
+                    <span class="text-slate-500 font-semibold"><i class="fa-regular fa-clock mr-1"></i> ${d.time}</span>
+                </div>
+            `).join('');
+        }
+
+        function submitSwap() {
+            const date = document.getElementById('swap-date').value;
+            const reason = document.getElementById('swap-reason').value.trim();
+            if (!date) {
+                showAlert('교체할 날짜를 선택해주세요.');
+                return;
+            }
+            const swap = { id: Date.now(), user: dbCache.currentUser.name, date, reason, status: '대기중' };
+            if (!dbCache.swaps[dbCache.currentOrgCode]) dbCache.swaps[dbCache.currentOrgCode] = [];
+            dbCache.swaps[dbCache.currentOrgCode].unshift(swap);
+            syncSubColToFirestore('swaps', dbCache.currentOrgCode, dbCache.swaps[dbCache.currentOrgCode]);
+            closeModal('swap-modal');
+            if (currentTab === 'duties') renderSwapList();
+            showAlert('대타 스왑 요청이 등록되었습니다.');
+        }
+
+        function renderSwapList() {
+            const container = document.getElementById('swap-list');
+            if (!container) return;
+            const list = dbCache.swaps[dbCache.currentOrgCode] || [];
+            if (list.length === 0) {
+                container.innerHTML = '<p class="text-center text-xs text-slate-400 py-6">등록된 대타 스왑 요청이 없습니다.</p>';
+                return;
+            }
+            container.innerHTML = list.map(s => `
+                <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2 text-xs">
+                    <div class="flex justify-between items-center font-bold text-slate-800">
+                        <span>신청자: ${s.user}</span>
+                        <span class="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 text-[10px]">${s.date}</span>
+                    </div>
+                    <p class="text-slate-600">${s.reason}</p>
+                    <button onclick="acceptSwap(${s.id})" class="w-full py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-xl font-bold text-xs transition">대타 수락하기</button>
+                </div>
+            `).join('');
+        }
+
+        function acceptSwap(id) {
+            showAlert('대타 스왑이 성공적으로 매칭되었습니다!');
+        }
+
+        function submitMeeting() {
+            const title = document.getElementById('meeting-title').value.trim();
+            let loc = document.getElementById('meeting-loc-select').value;
+            if (loc === '기타') loc = document.getElementById('meeting-custom-loc').value.trim() || '기타 장소';
+            const time = document.getElementById('meeting-time').value;
+
+            if (!title || !time) {
+                showAlert('제목과 시간을 모두 입력해주세요.');
+                return;
+            }
+
+            const meeting = { id: Date.now(), title, loc, time, rsvps: {}, attendance: {} };
+            if (!dbCache.meetings[dbCache.currentOrgCode]) dbCache.meetings[dbCache.currentOrgCode] = [];
+            dbCache.meetings[dbCache.currentOrgCode].unshift(meeting);
+            syncSubColToFirestore('meetings', dbCache.currentOrgCode, dbCache.meetings[dbCache.currentOrgCode]);
+            closeModal('meeting-modal');
+            if (currentTab === 'meetings') renderMeetingList();
+            showAlert('회의 소집 알림이 발송되었습니다.');
+        }
+
+        function handleRSVP(mid, status) {
+            const meetings = dbCache.meetings[dbCache.currentOrgCode] || [];
+            const m = meetings.find(x => x.id === mid);
+            if (m) {
+                m.rsvps[dbCache.currentUser.name] = status;
+                syncSubColToFirestore('meetings', dbCache.currentOrgCode, meetings);
+                renderMeetingList();
+            }
+        }
+
+        function handleAttendance(mid) {
+            const meetings = dbCache.meetings[dbCache.currentOrgCode] || [];
+            const m = meetings.find(x => x.id === mid);
+            if (m) {
+                m.attendance[dbCache.currentUser.name] = true;
+                syncSubColToFirestore('meetings', dbCache.currentOrgCode, meetings);
+                renderMeetingList();
+                showAlert('관리자에게 출석 보고가 완료되었습니다.');
+            }
+        }
+
+        function renderMeetingList() {
+            const container = document.getElementById('meeting-list');
+            const list = dbCache.meetings[dbCache.currentOrgCode] || [];
+            if (list.length === 0) {
+                container.innerHTML = '<p class="text-center text-xs text-slate-400 py-8">소집된 회의가 없습니다.</p>';
+                return;
+            }
+            container.innerHTML = list.map(m => {
+                const myRsvp = m.rsvps[dbCache.currentUser.name];
+                const attended = m.attendance[dbCache.currentUser.name];
+                return `
+                    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2.5 text-xs">
+                        <div class="flex justify-between items-center font-bold text-slate-800">
+                            <span class="text-sm">${m.title}</span>
+                            <span class="text-[10px] text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">${m.loc}</span>
+                        </div>
+                        <p class="text-slate-500"><i class="fa-regular fa-clock mr-1"></i> ${m.time.replace('T', ' ')}</p>
+                        <div class="flex gap-2 pt-1">
+                            <button onclick="handleRSVP(${m.id}, '참석')" class="flex-1 py-2 rounded-xl font-bold text-xs transition ${myRsvp==='참석'?'bg-emerald-600 text-white':'bg-slate-100 text-slate-600'}">참석 ${myRsvp==='참석'?'✓':''}</button>
+                            <button onclick="handleRSVP(${m.id}, '불참')" class="flex-1 py-2 rounded-xl font-bold text-xs transition ${myRsvp==='불참'?'bg-rose-600 text-white':'bg-slate-100 text-slate-600'}">불참 ${myRsvp==='불참'?'✓':''}</button>
+                            <button onclick="handleAttendance(${m.id})" class="px-4 py-2 rounded-xl font-bold text-xs transition ${attended?'bg-indigo-600 text-white':'bg-indigo-50 text-indigo-600'}">${attended?'출석완료':'출석하기'}</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function submitNotice() {
+            const title = document.getElementById('notice-title').value.trim();
+            const content = document.getElementById('notice-content').value.trim();
+            if (!title || !content) {
+                showAlert('제목과 내용을 모두 입력해주세요.');
+                return;
+            }
+            const notice = { id: Date.now(), title, content, date: new Date().toLocaleDateString() };
+            if (!dbCache.notices[dbCache.currentOrgCode]) dbCache.notices[dbCache.currentOrgCode] = [];
+            dbCache.notices[dbCache.currentOrgCode].unshift(notice);
+            syncSubColToFirestore('notices', dbCache.currentOrgCode, dbCache.notices[dbCache.currentOrgCode]);
+            closeModal('notice-modal');
+            if (currentTab === 'announcements') renderNoticeList();
+            showAlert('공지사항이 등록되었습니다.');
+        }
+
+        function renderNoticeList() {
+            const container = document.getElementById('notice-list');
+            const list = dbCache.notices[dbCache.currentOrgCode] || [];
+            if (list.length === 0) {
+                container.innerHTML = '<p class="text-center text-xs text-slate-400 py-8">등록된 공지사항이 없습니다.</p>';
+                return;
+            }
+            container.innerHTML = list.map(n => `
+                <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1.5 text-xs">
+                    <div class="flex justify-between items-center font-bold text-slate-800">
+                        <span class="text-sm">${n.title}</span>
+                        <span class="text-[10px] text-slate-400">${n.date}</span>
+                    </div>
+                    <p class="text-slate-600 leading-relaxed whitespace-pre-line">${n.content}</p>
+                </div>
+            `).join('');
+        }
+
+        function updateHomeDashboardData() {
+            const disc = dbCache.disciplines[dbCache.currentOrgCode] || [];
+            const meets = dbCache.meetings[dbCache.currentOrgCode] || [];
+            const duties = dbCache.duties[dbCache.currentOrgCode] || [];
+
+            const myCracks = disc.filter(d => d.author === dbCache.currentUser.name).length;
+            let myMeets = meets.filter(m => m.attendance[dbCache.currentUser.name]).length;
+
+            const totalHours = (myCracks + myMeets) * 1;
+
+            document.getElementById('dash-crack').innerText = `${myCracks}건`;
+            document.getElementById('dash-meeting').innerText = `${myMeets}회`;
+            document.getElementById('dash-time').innerText = `${totalHours}시간`;
+
+            const latestMeet = meets[0];
+            if (latestMeet) {
+                document.getElementById('home-meeting-preview').innerHTML = `<b>${latestMeet.title}</b> (${latestMeet.loc} / ${latestMeet.time.replace('T', ' ')})`;
+            } else {
+                document.getElementById('home-meeting-preview').innerText = '추가 일정 없음';
+            }
+
+            const myDuty = duties.find(d => d.memberName.includes(dbCache.currentUser.name));
+            const dutyPreview = document.getElementById('home-duty-preview');
+            if (dutyPreview) {
+                if (myDuty) {
+                    dutyPreview.innerHTML = `<b>${myDuty.day} (${myDuty.dutyType})</b> 선도 지도 (${myDuty.time}) - ${myDuty.memberName}`;
+                } else {
+                    dutyPreview.innerText = '이번 주 배정된 당번 일정이 없습니다.';
+                }
+            }
+        }
+
+        function openAdminModal() {
+            const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
+            if (!org) return;
+
+            if (org.imageUrl) {
+                document.getElementById('admin-org-preview').src = org.imageUrl;
+            }
+
+            const reasonsContainer = document.getElementById('admin-reasons-list');
+            const reasons = org.reasons || [
+                "휴대폰 사용 위반",
+                "수업 태도 불량",
+                "교내 흡연"
+            ];
+            
+            reasonsContainer.innerHTML = reasons.map((r, idx) => `
+                <span class="inline-flex items-center bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-lg font-bold text-[11px]">
+                    <span onclick="editReason(${idx})" class="cursor-pointer hover:underline mr-1.5" title="클릭하여 수정">${r}</span>
+                    <i class="fa-solid fa-pen text-[10px] mr-2 cursor-pointer hover:text-indigo-900" onclick="editReason(${idx})" title="수정"></i>
+                    <i class="fa-solid fa-xmark cursor-pointer hover:text-rose-600" onclick="removeReason(${idx})" title="삭제"></i>
+                </span>
+            `).join('') || '<span class="text-[11px] text-slate-400">등록된 위반 사유가 없습니다.</span>';
+
+            const membersContainer = document.getElementById('admin-members-list');
+            membersContainer.innerHTML = org.members.map(m => `
+                <div class="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs">
+                    <div>
+                        <b>${m.name}</b>
+                        <span class="ml-2 px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-700 font-bold text-[10px]">${m.role}</span>
+                    </div>
+                    <select onchange="changeRole('${m.name}', this.value)" class="bg-white border border-slate-200 px-2 py-1 rounded-lg font-bold text-xs">
+                        <option value="회원" ${m.role==='회원'?'selected':''}>회원</option>
+                        <option value="부단장" ${m.role==='부단장'?'selected':''}>부단장 (1명)</option>
+                        <option value="전교부회장" ${m.role==='전교부회장'?'selected':''}>전교부회장 (1명)</option>
+                        <option value="단장" ${m.role==='단장'?'selected':''}>단장 (1명)</option>
+                        <option value="전교회장" ${m.role==='전교회장'?'selected':''}>전교회장 (1명)</option>
+                    </select>
+                </div>
+            `).join('');
+
+            openModal('admin-modal');
+        }
+
+        function addReason() {
+            const input = document.getElementById('new-reason-input');
+            const val = input.value.trim();
+            if (!val) return;
+
+            const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
+            if (org) {
+                if (!org.reasons) org.reasons = [];
+                org.reasons.push(val);
+                syncOrgToFirestore(org);
+                input.value = '';
+                openAdminModal();
+                populateDisciplineReasonsDropdown();
+                showAlert('새로운 선도 위반 사유가 추가되었습니다.');
+            }
+        }
+
+        function editReason(idx) {
+            const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
+            if (!org || !org.reasons) return;
+            const current = org.reasons[idx];
+            const newVal = prompt("위반 사유를 수정하세요:", current);
+            if (newVal !== null && newVal.trim() !== "") {
+                org.reasons[idx] = newVal.trim();
+                syncOrgToFirestore(org);
+                openAdminModal();
+                populateDisciplineReasonsDropdown();
+                showAlert('위반 사유가 성공적으로 수정되었습니다.');
+            }
+        }
+
+        function removeReason(idx) {
+            const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
+            if (org && org.reasons) {
+                org.reasons.splice(idx, 1);
+                syncOrgToFirestore(org);
+                openAdminModal();
+                populateDisciplineReasonsDropdown();
+                showAlert('선도 위반 사유가 삭제되었습니다.');
+            }
+        }
+
+        function changeRole(targetName, newRole) {
+            const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
+            if (!org) return;
+
+            if (newRole === '단장' || newRole === '부단장' || newRole === '전교회장' || newRole === '전교부회장') {
+                org.members.forEach(m => {
+                    if (m.role === newRole) m.role = '회원';
+                });
+            }
+
+            const target = org.members.find(m => m.name === targetName);
+            if (target) target.role = newRole;
+
+            syncOrgToFirestore(org);
+            openAdminModal();
+            showMainApp();
+            showAlert(`${targetName} 님의 직책이 '${newRole}'(으)로 변경되었습니다.`);
+        }
+    </script>
+</body>
+</html>
