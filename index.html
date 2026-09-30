@@ -377,7 +377,7 @@
                 <button onclick="closeModal('swap-modal')" class="absolute top-5 right-5 w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-sm transition">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
-                <h3 class="text-lg font-bold text-slate-800 mb-4 pr-8">대타 맞교환(스왑) 신청</h3>
+                <h3 class="text-lg font-bold text-slate-800 mb-4 pr-8">대체 근무 신청</h3>
                 <div class="space-y-3 text-xs">
                     <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-3">
                         <label class="block font-bold text-indigo-700 mb-1">맞교환할 내 가장 빠른 지도 일정</label>
@@ -386,9 +386,9 @@
                     </div>
                     <div>
                         <label class="block font-bold text-slate-700 mb-1">요청 사유 및 메시지</label>
-                        <textarea id="swap-reason" placeholder="예: 개인 사정으로 인해 월요일 교문지도 대타 구합니다." class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl h-20 resize-none"></textarea>
+                        <textarea id="swap-reason" placeholder="예: 개인 사정으로 인해 월요일 교문지도 대체 근무를 신청합니다." class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl h-20 resize-none"></textarea>
                     </div>
-                    <button onclick="submitSwap()" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm transition shadow-sm mt-2">대타 스왑 등록</button>
+                    <button onclick="submitSwap()" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm transition shadow-sm mt-2">대체 근무 신청</button>
                 </div>
             </div>
         </div>
@@ -524,7 +524,7 @@
                 <button onclick="closeModal('guide-attendance-modal')" class="absolute top-5 right-5 w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button>
                 <h3 class="text-lg font-bold text-indigo-600 mb-4">지도 출석 기록</h3>
                 <div class="space-y-3 text-xs">
-                    <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-3 text-indigo-700 leading-relaxed">오늘 실제로 배정된 지도 일정만 출석할 수 있습니다. 대타 스왑이 완료된 경우에는 오늘 하루의 변경된 담당 일정이 자동 반영됩니다.</div>
+                    <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-3 text-indigo-700 leading-relaxed">오늘 실제로 배정된 지도 일정만 출석할 수 있습니다. 대체 근무가 확정된 경우에는 오늘 하루의 변경된 담당 일정이 자동 반영됩니다.</div>
                     <div><label class="block font-bold mb-1">오늘의 지도 일정</label><select id="guide-att-assignment" onchange="refreshGuideAttendanceWindow()" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl"></select></div>
                     <div id="guide-att-window-info" class="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-600"></div>
                     <button id="guide-att-submit-btn" onclick="submitGuideAttendance()" class="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold disabled:bg-slate-300 disabled:cursor-not-allowed">지도 출석하기 (1시간 인정)</button>
@@ -806,33 +806,52 @@
             const sb = requireSupabase();
             if (!sb) return false;
 
-            const { data: { user: authUser } } = await sb.auth.getUser();
-            if (!authUser) {
-                dbCache.currentUser = null;
-                saveLocalCache();
-                return false;
+            try {
+                let { data: { session }, error: sessionError } = await sb.auth.getSession();
+                if (sessionError) console.warn('저장된 로그인 세션 확인:', sessionError);
+
+                // 로그인 저장을 선택했다면 만료 직전/만료된 세션의 갱신을 한 번 더 시도
+                if (!session && safeStorage.getItem('sc_keep_login') === '1') {
+                    try {
+                        const refreshed = await sb.auth.refreshSession();
+                        session = refreshed.data?.session || null;
+                    } catch (e) {
+                        console.warn('로그인 세션 자동 갱신 실패:', e);
+                    }
+                }
+
+                const authUser = session?.user || null;
+
+                // 세션이 정말 없는 경우에만 로그인 상태를 해제
+                if (!authUser) {
+                    dbCache.currentUser = null;
+                    saveLocalCache();
+                    return false;
+                }
+
+                const { data, error } = await sb
+                    .from('users')
+                    .select('id,grade,class,number,name,profile_image')
+                    .eq('id', authUser.id)
+                    .maybeSingle();
+
+                if (error) {
+                    // 일시적인 네트워크 오류만으로 저장된 로그인 UI 상태를 지우지 않음
+                    console.error('사용자 프로필 로드 실패:', error);
+                    return !!dbCache.currentUser;
+                }
+
+                if (data) {
+                    dbCache.currentUser = data;
+                    saveLocalCache();
+                    return true;
+                }
+
+                return !!dbCache.currentUser;
+            } catch (e) {
+                console.error('로그인 세션 복원 실패:', e);
+                return !!dbCache.currentUser;
             }
-
-            const { data, error } = await sb
-                .from('users')
-                .select('id,grade,class,number,name,profile_image')
-                .eq('id', authUser.id)
-                .maybeSingle();
-
-            if (error) {
-                console.error('사용자 프로필 로드 실패:', error);
-                return false;
-            }
-
-            if (data) {
-                dbCache.currentUser = data;
-                saveLocalCache();
-                return true;
-            }
-
-            dbCache.currentUser = null;
-            saveLocalCache();
-            return false;
         }
 
         async function syncOrgToSupabase(org) {
@@ -918,8 +937,10 @@
             try {
                 await window.supabaseReadyPromise;
                 if (window.appState.isSupabaseReady) {
-                    await loadCurrentUserFromSupabase();
-                    await loadAllFromSupabase();
+                    const restored = await loadCurrentUserFromSupabase();
+                    if (restored) {
+                        await loadAllFromSupabase();
+                    }
                 }
             } catch (e) {
                 console.error('Supabase 초기 로딩 실패:', e);
@@ -1018,8 +1039,13 @@
 
             const remember = document.getElementById('login-remember')?.checked !== false;
             safeStorage.setItem('sc_keep_login', remember ? '1' : '0');
-            if (remember) safeStorage.setItem('sc_saved_login_name', name);
-            else safeStorage.removeItem('sc_saved_login_name');
+            if (remember) {
+                safeStorage.setItem('sc_saved_login_name', name);
+                // Supabase의 refresh token이 localStorage에 기록된 상태를 확인/갱신
+                try { await sb.auth.refreshSession(); } catch(e) { console.warn(e); }
+            } else {
+                safeStorage.removeItem('sc_saved_login_name');
+            }
 
             await loadAllFromSupabase();
             checkOrgMembership();
@@ -1273,32 +1299,28 @@
         let bottomNavRefreshBusy=false;
 
         function handleBottomNavTap(tab){
-            // 선도 내부 화면도 하단에서는 '선도' 탭으로 취급
             const activeBottomTab=['records','duties','manual'].includes(currentTab)
                 ? 'discipline'
                 : currentTab;
 
-            // 현재 보고 있는 하단 메뉴를 다시 누르면
-            // 복잡한 부분 동기화 대신 앱 자체를 새로 불러옵니다.
-            // iPhone/iPad Safari에서도 가장 안정적으로 최신 Supabase 데이터를 다시 읽습니다.
-            if(activeBottomTab===tab){
+            // 홈 화면에서 홈 버튼을 한 번 더 눌렀을 때만 전체 새로고침
+            if(tab==='home' && activeBottomTab==='home'){
                 if(bottomNavRefreshBusy)return;
                 bottomNavRefreshBusy=true;
 
                 try{
-                    sessionStorage.setItem('sc_reopen_tab_after_refresh',tab);
+                    sessionStorage.setItem('sc_reopen_tab_after_refresh','home');
                 }catch(e){}
 
-                const btn=document.querySelector(`.tab-btn[data-tab="${tab}"]`);
+                const btn=document.querySelector('.tab-btn[data-tab="home"]');
                 const icon=btn?.querySelector('i');
-                if(icon) icon.style.animation='pullRefreshSpin .65s linear infinite';
+                if(icon)icon.style.animation='pullRefreshSpin .65s linear infinite';
 
-                // 캐시된 화면이 아니라 실제 페이지 로드를 다시 실행
                 window.location.reload();
                 return;
             }
 
-            // 다른 메뉴는 기존처럼 바로 이동
+            // 공지/선도/회의소집/부서는 다시 눌러도 전체 새로고침하지 않음
             switchTab(tab);
         }
 
@@ -1343,7 +1365,7 @@
                             <div id="home-attendance-alerts" class="space-y-2"></div>
                             <div class="grid grid-cols-2 gap-2 mt-1">
                                 <button onclick="openGuideAttendanceModal()" class="py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs">지도 출석하기</button>
-                                <button onclick="openSwapModal()" class="py-2 bg-slate-100 hover:bg-slate-200 text-indigo-600 rounded-xl font-bold text-xs transition">대타(스왑) 신청</button>
+                                <button onclick="openSwapModal()" class="py-2 bg-slate-100 hover:bg-slate-200 text-indigo-600 rounded-xl font-bold text-xs transition">대체 근무 신청</button>
                             </div>
                         </div>
                         <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
@@ -1373,7 +1395,7 @@
                         <div><h2 class="text-base font-bold text-slate-800">선도</h2><p class="text-[11px] text-slate-500">원하는 메뉴를 선택하세요.</p></div>
                         <button onclick="switchTab('manual')" class="w-full bg-white border border-slate-200 shadow-sm rounded-2xl p-4 text-left flex items-center justify-between"><div><div class="font-bold text-slate-800"><i class="fa-solid fa-book-open text-indigo-600 mr-2"></i>선도 매뉴얼</div><div class="text-[11px] text-slate-500 mt-1">선도 기준과 업무 매뉴얼 확인</div></div><i class="fa-solid fa-chevron-right text-slate-300"></i></button>
                         <button onclick="switchTab('records')" class="w-full bg-white border border-slate-200 shadow-sm rounded-2xl p-4 text-left flex items-center justify-between"><div><div class="font-bold text-slate-800"><i class="fa-solid fa-clipboard-user text-indigo-600 mr-2"></i>선도 기록</div><div class="text-[11px] text-slate-500 mt-1">단속 기록과 변경 요청 확인</div></div><i class="fa-solid fa-chevron-right text-slate-300"></i></button>
-                        <button onclick="switchTab('duties')" class="w-full bg-white border border-slate-200 shadow-sm rounded-2xl p-4 text-left flex items-center justify-between"><div><div class="font-bold text-slate-800"><i class="fa-solid fa-calendar-week text-indigo-600 mr-2"></i>선도 일정</div><div class="text-[11px] text-slate-500 mt-1">지도 일정·대타·출석 보고 확인</div></div><i class="fa-solid fa-chevron-right text-slate-300"></i></button>
+                        <button onclick="switchTab('duties')" class="w-full bg-white border border-slate-200 shadow-sm rounded-2xl p-4 text-left flex items-center justify-between"><div><div class="font-bold text-slate-800"><i class="fa-solid fa-calendar-week text-indigo-600 mr-2"></i>선도 일정</div><div class="text-[11px] text-slate-500 mt-1">지도 일정·대체 근무·출석 보고 확인</div></div><i class="fa-solid fa-chevron-right text-slate-300"></i></button>
                     </div>`;
             } else if (tab === 'records') {
                 container.innerHTML = `
@@ -1404,7 +1426,7 @@
                         <div class="flex justify-between items-center">
                             <div>
                                 <button onclick="switchTab('discipline')" class="text-[11px] text-indigo-600 font-bold mb-1">‹ 선도</button><h2 class="text-base font-bold text-slate-800">선도 지도 일정 관리</h2>
-                                <p class="text-[11px] text-slate-500">같은 요일·같은 지도 유형 인원을 묶어서 확인 · 날짜별 스왑 반영</p>
+                                <p class="text-[11px] text-slate-500">같은 요일·같은 지도 유형 인원을 묶어서 확인 · 날짜별 대체 근무 반영</p>
                             </div>
                             ${isAdmin ? `<button onclick="openDutyModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3.5 py-2 rounded-xl font-bold transition shadow-sm">+ 일정 배정</button>` : ''}
                         </div>
@@ -1416,7 +1438,7 @@
                         </div>` : ''}
                         <div id="duty-schedule-list" class="space-y-3"></div>
                         <div class="border-t border-slate-200 pt-3">
-                            <h3 class="text-xs font-bold text-slate-700 mb-2">대타(스왑) 신청 현황</h3>
+                            <h3 class="text-xs font-bold text-slate-700 mb-2">대체 근무 신청 현황</h3>
                             <div id="swap-list" class="space-y-3"></div>
                         </div>
                         ${isAdmin ? `<div class="border-t border-slate-200 pt-3"><h3 class="text-xs font-bold text-slate-700 mb-2">지도 출석 보고</h3><div id="guide-attendance-report" class="space-y-2"></div></div>` : ''}
@@ -2268,24 +2290,24 @@
             return out.sort((a,b)=>a.date.localeCompare(b.date)||String(a.time).localeCompare(String(b.time)));
         }
         function openSwapModal(){
-            const pending=(dbCache.swaps[dbCache.currentOrgCode]||[]).find(s=>s.user===dbCache.currentUser.name&&s.status==='대기중');if(pending)return showAlert('이미 요청 중인 대타가 있습니다. 기존 요청을 삭제한 뒤 다시 요청해주세요.');
+            const pending=(dbCache.swaps[dbCache.currentOrgCode]||[]).find(s=>s.user===dbCache.currentUser.name&&s.status==='대기중');if(pending)return showAlert('이미 요청 중인 대체 근무가 있습니다. 기존 요청을 삭제한 뒤 다시 요청해주세요.');
             const d=getMyUpcomingDutyChoices()[0];if(!d)return showAlert('앞으로 배정된 지도 일정이 없습니다.');
             const el=document.getElementById('swap-next-assignment');if(el){el.textContent=`${d.date} · ${d.dutyType} · ${d.time}`;el._duty=d;}document.getElementById('swap-reason').value='';openModal('swap-modal');
         }
         async function submitSwap(){
-            const pending=(dbCache.swaps[dbCache.currentOrgCode]||[]).find(s=>s.user===dbCache.currentUser.name&&s.status==='대기중');if(pending)return showAlert('대타 요청은 동시에 하나만 등록할 수 있습니다.');
+            const pending=(dbCache.swaps[dbCache.currentOrgCode]||[]).find(s=>s.user===dbCache.currentUser.name&&s.status==='대기중');if(pending)return showAlert('대체 근무 요청은 동시에 하나만 등록할 수 있습니다.');
             const d=document.getElementById('swap-next-assignment')?._duty,reason=document.getElementById('swap-reason').value.trim();if(!d)return showAlert('맞교환할 일정을 찾지 못했습니다.');
             const list=(dbCache.swaps[dbCache.currentOrgCode]||=[]);list.unshift({id:Date.now(),user:dbCache.currentUser.name,date:d.date,dutyType:d.dutyType,time:d.time,reason,status:'대기중',acceptedBy:null});
-            await syncSubColToFirestore('swaps',dbCache.currentOrgCode,list);closeModal('swap-modal');if(currentTab==='duties')renderSwapList();showAlert('가장 빠른 지도 일정으로 대타 맞교환 요청을 등록했습니다.');
+            await syncSubColToFirestore('swaps',dbCache.currentOrgCode,list);closeModal('swap-modal');if(currentTab==='duties')renderSwapList();showAlert('가장 빠른 지도 일정으로 대체 근무 요청을 등록했습니다.');
         }
         function renderSwapList(){
             const container=document.getElementById('swap-list');if(!container)return;const list=(dbCache.swaps[dbCache.currentOrgCode]||[]).filter(s=>s.status!=='완료');
-            if(!list.length){container.innerHTML='<p class="text-center text-xs text-slate-400 py-6">대기 중인 대타 스왑 요청이 없습니다.</p>';return;}
+            if(!list.length){container.innerHTML='<p class="text-center text-xs text-slate-400 py-6">대기 중인 대체 근무 요청이 없습니다.</p>';return;}
             container.innerHTML=list.map(s=>`<div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2 text-xs"><div class="flex justify-between"><b>${s.user}</b><span class="text-indigo-600">${s.date} · ${s.time||''}</span></div><p>${s.dutyType||''} · ${s.reason||'사유 없음'}</p><p class="font-bold text-amber-600">대기중</p><div class="flex gap-2">${s.user!==dbCache.currentUser.name?`<button onclick="acceptSwap(${s.id})" class="flex-1 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold">가장 빠른 일정끼리 맞교환</button>`:''}${s.user===dbCache.currentUser.name?`<button onclick="deleteMySwap(${s.id})" class="flex-1 py-2 bg-rose-50 text-rose-600 rounded-xl font-bold">내 요청 삭제</button>`:''}</div></div>`).join('');
         }
         async function deleteMySwap(id){
-            const list=dbCache.swaps[dbCache.currentOrgCode]||[],s=list.find(x=>x.id===id);if(!s||s.user!==dbCache.currentUser.name||s.status==='완료')return showAlert('삭제할 수 없는 요청입니다.');if(!confirm('이 대타 요청을 삭제하시겠습니까?'))return;
-            dbCache.swaps[dbCache.currentOrgCode]=list.filter(x=>x.id!==id);await syncSubColToFirestore('swaps',dbCache.currentOrgCode,dbCache.swaps[dbCache.currentOrgCode]);renderSwapList();showAlert('대타 요청이 삭제되었습니다.');
+            const list=dbCache.swaps[dbCache.currentOrgCode]||[],s=list.find(x=>x.id===id);if(!s||s.user!==dbCache.currentUser.name||s.status==='완료')return showAlert('삭제할 수 없는 요청입니다.');if(!confirm('이 대체 근무 요청을 삭제하시겠습니까?'))return;
+            dbCache.swaps[dbCache.currentOrgCode]=list.filter(x=>x.id!==id);await syncSubColToFirestore('swaps',dbCache.currentOrgCode,dbCache.swaps[dbCache.currentOrgCode]);renderSwapList();showAlert('대체 근무 요청이 삭제되었습니다.');
         }
         async function acceptSwap(id){
             if(refreshInFlight)return showAlert('동기화 중입니다. 잠시 후 다시 눌러주세요.');
@@ -2295,13 +2317,13 @@
 
             const list=dbCache.swaps[dbCache.currentOrgCode]||[];
             const s=list.find(x=>String(x.id)===String(id));
-            if(!s)return showAlert('대타 요청을 찾지 못했습니다.');
+            if(!s)return showAlert('대체 근무 요청을 찾지 못했습니다.');
             if(s.status!=='대기중')return showAlert('이미 다른 사람이 수락했거나 종료된 요청입니다.');
             if(s.user===dbCache.currentUser.name)return showAlert('본인의 요청은 수락할 수 없습니다.');
 
             const requesterDuty=getEffectiveDutyForDate(s.user,s.date)
                 .find(d=>(!s.dutyType||d.dutyType===s.dutyType)&&(!s.time||d.time===s.time));
-            if(!requesterDuty)return showAlert('요청자의 해당 일정이 이미 변경되어 스왑할 수 없습니다.');
+            if(!requesterDuty)return showAlert('요청자의 해당 일정이 이미 변경되어 대체 근무를 확정할 수 없습니다.');
 
             const my=getMyUpcomingDutyChoices(dbCache.currentUser.name)[0];
             if(!my)return showAlert('맞교환하려면 본인에게 앞으로 배정된 지도 일정이 있어야 합니다.');
@@ -2410,64 +2432,68 @@
         async function deleteDepartment(id){const org=currentOrg(),d=getDepartments(org).find(x=>x.id===id);if(!d)return;if(!confirm(`${d.name}을(를) 삭제할까요? 해당 부서원은 미배정 상태가 됩니다.`))return;org.departments=org.departments.filter(x=>x.id!==id);(org.members||[]).forEach(m=>{if(m.departmentId===id){delete m.departmentId;delete m.departmentRole;}});await syncOrgToFirestore(org);renderDepartmentAdmin();showAlert('부서를 삭제했습니다.');}
         async function saveMemberDepartment(name){
             if(!currentUserIsAdmin())return showAlert('부서 배치와 부장 임명은 관리자만 가능합니다.');
-            const org=currentOrg(),m=org?.members?.find(x=>x.name===name);
-            if(!org||!m)return showAlert('조직원 정보를 찾지 못했습니다.');
+
+            const org=currentOrg();
+            const member=org?.members?.find(x=>x.name===name);
+            if(!org||!member)return showAlert('조직원 정보를 찾지 못했습니다.');
 
             const deptEl=document.getElementById(`member-dept-${safeDomId(name)}`);
             const headEl=document.getElementById(`member-head-${safeDomId(name)}`);
             const did=deptEl?.value||'';
             const requested=headEl?.value||'부원';
-            const before=JSON.parse(JSON.stringify(org.members||[]));
 
-            if(!did){
-                delete m.departmentId;
-                delete m.departmentRole;
-            }else{
-                if(!departmentById(did))return showAlert('선택한 부서를 찾지 못했습니다.');
+            if(did && !getDepartments(org).some(d=>d.id===did)){
+                return showAlert('선택한 부서를 찾지 못했습니다.');
+            }
 
-                if(requested==='부장'){
-                    const exists=(org.members||[]).find(
-                        x=>x.name!==name&&x.departmentId===did&&x.departmentRole==='부장'
-                    );
-                    if(exists)return showAlert(`${departmentById(did)?.name||'이 부서'}의 부장은 이미 ${exists.name} 님입니다.`);
-                }
-
-                const moved=!!m.departmentId&&m.departmentId!==did;
-                m.departmentId=did;
-
-                if(requested==='부장'){
-                    m.departmentRole='부장';
-                }else if(moved || !['차장','부원'].includes(m.departmentRole)){
-                    m.departmentRole='부원';
+            if(did && requested==='부장'){
+                const exists=(org.members||[]).find(
+                    x=>x.name!==name && x.departmentId===did && x.departmentRole==='부장'
+                );
+                if(exists){
+                    return showAlert(`${departmentById(did)?.name||'이 부서'}의 부장은 이미 ${exists.name} 님입니다.`);
                 }
             }
 
-            const ok=await syncOrgToFirestore(org);
-            if(!ok){
-                org.members=before;
-                renderDepartmentAdmin();
-                return;
-            }
+            const sb=requireSupabase();
+            if(!sb)return;
 
-            // 서버에서 다시 읽어 실제 저장 여부까지 확인합니다.
-            await loadAllFromSupabase();
-            const saved=currentOrg()?.members?.find(x=>x.name===name);
-            const expectedRole=did?(requested==='부장'?'부장':(saved?.departmentRole==='차장'?'차장':'부원')):undefined;
+            try{
+                // organizations JSON 전체를 브라우저에서 UPDATE하지 않고,
+                // 인증된 관리자 전용 DB 함수가 해당 조직원 한 명의 부서 정보만 안전하게 수정합니다.
+                const {data,error}=await sb.rpc('assign_member_department',{
+                    p_org_code: org.code,
+                    p_member_name: name,
+                    p_department_id: did || null,
+                    p_department_role: did ? requested : null
+                });
 
-            if(did && saved?.departmentId!==did){
-                renderDepartmentAdmin();
-                return showAlert('부서 배정이 서버에 반영되지 않았습니다. 다시 시도해주세요.');
-            }
-            if(!did && saved?.departmentId){
-                renderDepartmentAdmin();
-                return showAlert('부서 미배정 처리가 서버에 반영되지 않았습니다.');
-            }
+                if(error)throw error;
+                if(data?.ok===false)throw new Error(data?.message||'부서 배정에 실패했습니다.');
 
-            renderDepartmentAdmin();
-            if(currentTab==='departments')renderDepartmentHub();
-            showAlert(did
-                ? `${name} 님을 ${departmentDisplayName(did)} ${expectedRole||'부원'}으로 저장했습니다.`
-                : `${name} 님을 부서 미배정으로 저장했습니다.`);
+                const loaded=await loadAllFromSupabase();
+                if(!loaded)throw new Error('저장 후 최신 부서 정보를 다시 불러오지 못했습니다.');
+
+                const saved=currentOrg()?.members?.find(x=>x.name===name);
+                if(did && saved?.departmentId!==did){
+                    throw new Error('서버에 부서 배정이 반영되지 않았습니다.');
+                }
+                if(!did && saved?.departmentId){
+                    throw new Error('서버에 미배정 처리가 반영되지 않았습니다.');
+                }
+
+                renderDepartmentAdmin();
+                if(currentTab==='departments')renderDepartmentHub();
+
+                const savedRole=saved?.departmentRole||'부원';
+                showAlert(did
+                    ? `${name} 님을 ${departmentDisplayName(did)} ${savedRole}으로 저장했습니다.`
+                    : `${name} 님을 부서 미배정으로 저장했습니다.`);
+            }catch(e){
+                console.error('부서 배정 저장 실패:',e);
+                renderDepartmentAdmin();
+                showAlert('부서 배정 저장 실패: '+(e?.message||e));
+            }
         }
 
         async function appointDeputy(departmentId){
@@ -2567,7 +2593,7 @@
             const rows=[], dutyRows=(dbCache.duties[dbCache.currentOrgCode]||[]).filter(x=>x.kind!=='pause');
             let latestDutyEnd=localDateStr(); dutyRows.forEach(x=>{if((x.endDate||latestDutyEnd)>latestDutyEnd)latestDutyEnd=x.endDate||latestDutyEnd;});
             for(let ds=localDateStr(),guard=0;ds<=latestDutyEnd&&guard<740;ds=kstDateAdd(ds,1),guard++){const eff=getEffectiveDutyForDate(dbCache.currentUser.name,ds);eff.forEach(x=>rows.push({...x,date:ds}));}
-            const dp=document.getElementById('home-duty-preview'); if(dp) dp.innerHTML=rows.length?rows.slice(0,8).map(d=>`<div class="border-t pt-2"><b>${d.date} · ${d.dutyType}</b> (${d.time})${d.originalMemberName!==d.effectiveMemberName?` <span class="text-indigo-600 font-bold">· 스왑 반영</span>`:''}</div>`).join(''):(getDutyPause()?`<span class="text-amber-600 font-bold">현재 ${getDutyPause().endDate}까지 지도 중지 중입니다.</span>`:'배정된 지도 일정이 없습니다.');
+            const dp=document.getElementById('home-duty-preview'); if(dp) dp.innerHTML=rows.length?rows.slice(0,8).map(d=>`<div class="border-t pt-2"><b>${d.date} · ${d.dutyType}</b> (${d.time})${d.originalMemberName!==d.effectiveMemberName?` <span class="text-indigo-600 font-bold">· 대체 근무 반영</span>`:''}</div>`).join(''):(getDutyPause()?`<span class="text-amber-600 font-bold">현재 ${getDutyPause().endDate}까지 지도 중지 중입니다.</span>`:'배정된 지도 일정이 없습니다.');
             renderHomeAttendanceAlerts();
             checkGuideReminder();
         }
@@ -2576,7 +2602,7 @@
             const assignments=getEffectiveDutyForDate(dbCache.currentUser.name,today);
             const sel=document.getElementById('guide-att-assignment');
             if(!assignments.length) return showAlert('오늘 배정된 지도 일정이 없습니다.');
-            sel.innerHTML=assignments.map((d,i)=>`<option value="${i}">${d.dutyType} · ${d.time}${d.originalMemberName!==d.effectiveMemberName?' · 스왑 일정':''}</option>`).join('');
+            sel.innerHTML=assignments.map((d,i)=>`<option value="${i}">${d.dutyType} · ${d.time}${d.originalMemberName!==d.effectiveMemberName?'  · 대체 근무 일정':''}</option>`).join('');
             sel.dataset.date=today; sel._assignments=assignments;
             refreshGuideAttendanceWindow(); openModal('guide-attendance-modal');
         }
@@ -2742,7 +2768,7 @@
             if(!currentUserIsAdmin())return showAlert('관리자만 조직원을 추방할 수 있습니다.');
             if(name===dbCache.currentUser.name)return showAlert('본인은 이 기능으로 추방할 수 없습니다.');
 
-            const first=confirm(`${name} 님을 학생회 조직에서 추방할까요?\n지도 일정과 대기 중인 대타 요청도 함께 정리됩니다.`);
+            const first=confirm(`${name} 님을 학생회 조직에서 추방할까요?\n지도 일정과 대기 중인 대체 근무 요청도 함께 정리됩니다.`);
             if(!first)return;
             const second=confirm(`마지막 확인입니다.\n정말 ${name} 님을 조직에서 추방하시겠습니까?`);
             if(!second)return;
@@ -2797,114 +2823,8 @@
         }
 
         function initPullToRefresh(){
-            const area=document.getElementById('main-content');
-            const indicator=document.getElementById('pull-refresh-indicator');
-            const icon=indicator?.querySelector('i');
-            if(!area||!indicator||window.__pullRefreshV12Ready)return;
-            window.__pullRefreshV12Ready=true;
-
-            let startY=0;
-            let lastY=0;
-            let tracking=false;
-            let busy=false;
-            let startedInsideMain=false;
-
-            // 사용자가 말한 "화면의 30%"를 실제 보이는 앱 영역 기준으로 계산.
-            const threshold=()=>{
-                const h=Math.min(
-                    window.innerHeight||0,
-                    document.getElementById('app')?.getBoundingClientRect().height||window.innerHeight||0
-                );
-                return Math.max(110,h*0.30);
-            };
-
-            const resetIndicator=()=>{
-                indicator.classList.remove('show','ready','refreshing');
-                indicator.style.opacity='0';
-                indicator.style.transform='translate(-50%,-50%) scale(.72)';
-                if(icon)icon.style.transform='rotate(0deg)';
-            };
-
-            const paint=(dy)=>{
-                const need=threshold();
-                const progress=Math.max(0,Math.min(1,dy/need));
-                const degrees=(dy/need)*540;
-
-                indicator.classList.toggle('show',dy>4);
-                indicator.classList.toggle('ready',progress>=1);
-                indicator.style.opacity=String(Math.max(.20,progress));
-                indicator.style.transform=`translate(-50%,-50%) scale(${0.76+progress*0.24})`;
-
-                if(icon)icon.style.transform=`rotate(${degrees}deg)`;
-            };
-
-            // document에서 받는 이유:
-            // iPhone/iPad Safari가 overflow 요소의 touchmove를 중간에 가져가는 현상을 피하기 위함.
-            document.addEventListener('touchstart',(e)=>{
-                if(busy||refreshInFlight||e.touches?.length!==1)return;
-
-                const target=e.target;
-                startedInsideMain=target instanceof Node && area.contains(target);
-
-                if(!startedInsideMain)return;
-                if(area.scrollTop>1)return;
-
-                startY=e.touches[0].clientY;
-                lastY=startY;
-                tracking=true;
-            },{passive:true,capture:true});
-
-            document.addEventListener('touchmove',(e)=>{
-                if(!tracking||busy||e.touches?.length!==1)return;
-
-                lastY=e.touches[0].clientY;
-                const dy=lastY-startY;
-
-                if(dy<=0||area.scrollTop>1){
-                    tracking=false;
-                    resetIndicator();
-                    return;
-                }
-
-                // 기본 Safari 고무줄/브라우저 새로고침 대신 앱의 동기화 제스처를 사용.
-                if(e.cancelable)e.preventDefault();
-                paint(dy);
-            },{passive:false,capture:true});
-
-            document.addEventListener('touchend',async(e)=>{
-                if(!tracking||busy)return;
-                tracking=false;
-
-                const endY=e.changedTouches?.[0]?.clientY??lastY;
-                const dy=endY-startY;
-
-                if(startedInsideMain&&area.scrollTop<=1&&dy>=threshold()){
-                    busy=true;
-                    indicator.classList.add('show','ready','refreshing');
-                    indicator.style.opacity='1';
-                    if(icon)icon.style.transform='';
-
-                    const ok=await refreshAppData(false,false);
-
-                    setTimeout(()=>{
-                        resetIndicator();
-                        busy=false;
-                        if(ok)showAlert('최신 데이터로 동기화했습니다.');
-                        else showAlert('동기화에 실패했습니다.');
-                    },450);
-                }else{
-                    resetIndicator();
-                }
-            },{passive:true,capture:true});
-
-            document.addEventListener('touchcancel',()=>{
-                tracking=false;
-                startedInsideMain=false;
-                resetIndicator();
-            },{passive:true,capture:true});
-
-            window.addEventListener('orientationchange',resetIndicator);
-            resetIndicator();
+            // v16: 당겨서 새로고침은 사용하지 않습니다.
+            // 새로고침은 홈 화면에서 하단 홈 버튼을 다시 눌렀을 때만 실행됩니다.
         }
 
         let autoSyncChannel=null;
@@ -2989,7 +2909,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=15',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=16',{scope:'./',updateViaCache:'none'});
         }
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
@@ -3102,7 +3022,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=15',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=16',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
