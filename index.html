@@ -386,6 +386,22 @@
             </div>
         </div>
 
+        <!-- Meeting Poll Modal -->
+        <div id="poll-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-end justify-center">
+            <div class="modal-content bg-white w-full max-w-md rounded-t-3xl p-6 max-h-[85vh] overflow-y-auto relative">
+                <button onclick="closeModal('poll-modal')" class="absolute top-5 right-5 w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button>
+                <h3 class="text-lg font-bold text-indigo-600 mb-4">회의 투표 만들기</h3>
+                <div class="space-y-3 text-xs">
+                    <div><label class="block font-bold mb-1">투표 제목</label><input id="poll-title" class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl" placeholder="예: 체육대회 종목 선택"></div>
+                    <div><label class="block font-bold mb-1">설명 (선택)</label><textarea id="poll-details" class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl h-16" placeholder="투표 세부사항"></textarea></div>
+                    <div><label class="block font-bold mb-1">후보/선택지 (한 줄에 하나, 개수 제한 없음)</label><textarea id="poll-options" class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl h-32" placeholder="후보 1\n후보 2\n후보 3"></textarea></div>
+                    <label class="flex items-center gap-2"><input id="poll-anonymous" type="checkbox" checked> 익명 투표</label>
+                    <label class="flex items-center gap-2"><input id="poll-show-results" type="checkbox" checked> 회원에게 득표수/비율/투표율 공개</label>
+                    <button onclick="createPoll()" class="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold">투표 등록 + 공지</button>
+                </div>
+            </div>
+        </div>
+
         <!-- 4. Notice Modal -->
         <div id="notice-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-end justify-center">
             <div class="modal-content bg-white w-full max-w-md rounded-t-3xl p-6 max-h-[85vh] overflow-y-auto transform transition-all relative">
@@ -610,7 +626,8 @@
             duties: {},
             guideAttendance: {},
             manuals: {},
-            manualRequests: {}
+            manualRequests: {},
+            polls: {}
         };
 
         function saveLocalCache() {
@@ -674,6 +691,7 @@
                 dbCache.guideAttendance = {};
                 dbCache.manuals = {};
                 dbCache.manualRequests = {};
+                dbCache.polls = {};
 
                 (rows || []).forEach(row => {
                     if (row.data_type === 'disciplines') dbCache.disciplines[row.org_code] = row.items || [];
@@ -684,6 +702,7 @@
                     if (row.data_type === 'guide_attendance') dbCache.guideAttendance[row.org_code] = row.items || [];
                     if (row.data_type === 'manual') dbCache.manuals[row.org_code] = row.items || [];
                     if (row.data_type === 'manual_requests') dbCache.manualRequests[row.org_code] = row.items || [];
+                    if (row.data_type === 'polls') dbCache.polls[row.org_code] = row.items || [];
                 });
 
                 return true;
@@ -1203,12 +1222,14 @@
                                 <h2 class="text-base font-bold text-slate-800">회의 소집 및 출석</h2>
                                 <p class="text-[11px] text-slate-500">정기 회의 및 RSVP 투표</p>
                             </div>
-                            ${isAdmin ? `<button onclick="editingMeetingId=null; document.getElementById('meeting-title').value=''; document.getElementById('meeting-details').value=''; document.getElementById('meeting-time').value=''; openModal('meeting-modal')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3.5 py-2 rounded-xl font-bold transition shadow-sm">+ 회의 소집</button>` : ''}
+                            ${isAdmin ? `<div class="flex gap-1"><button onclick="openPollModal()" class="bg-violet-600 text-white text-xs px-3 py-2 rounded-xl font-bold">+ 투표</button><button onclick="editingMeetingId=null; document.getElementById('meeting-title').value=''; document.getElementById('meeting-details').value=''; document.getElementById('meeting-time').value=''; openModal('meeting-modal')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-2 rounded-xl font-bold transition shadow-sm">+ 회의</button></div>` : ''}
                         </div>
                         <div id="meeting-list" class="space-y-3"></div>
+                        <div class="border-t border-slate-200 pt-3"><h3 class="font-bold text-sm mb-2">회의 투표</h3><div id="poll-list" class="space-y-3"></div></div>
                     </div>
                 `;
                 renderMeetingList();
+                renderPollList();
             } else if (tab === 'manual') {
                 const manual = getManualContent();
                 const requests = dbCache.manualRequests[dbCache.currentOrgCode] || [];
@@ -1274,7 +1295,19 @@
                             </div>
                         </div>
 
+                        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+                            <h3 class="font-bold text-slate-700"><i class="fa-solid fa-key mr-1"></i> 내 비밀번호 변경</h3>
+                            <input id="new-password" type="password" minlength="6" placeholder="새 비밀번호 (6자 이상)" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl">
+                            <button onclick="changeMyPassword()" class="w-full py-2.5 bg-indigo-600 text-white rounded-xl font-bold">비밀번호 변경</button>
+                        </div>
+
                         ${isAdmin ? `
+                        <div class="bg-amber-50 p-4 rounded-2xl border border-amber-100 shadow-sm space-y-2">
+                            <h3 class="font-bold text-amber-700">회원 비밀번호 초기화</h3>
+                            <p class="text-slate-600">선택한 회원의 비밀번호를 123456으로 초기화합니다.</p>
+                            <select id="reset-member-name" class="w-full bg-white border border-amber-200 px-3 py-2 rounded-xl">${org.members.filter(m=>m.name!==dbCache.currentUser.name).map(m=>`<option value="${m.name}">${m.name} (${m.role})</option>`).join('')}</select>
+                            <button onclick="resetMemberPassword()" class="w-full py-2.5 bg-amber-600 text-white rounded-xl font-bold">123456으로 초기화</button>
+                        </div>
                         <div class="bg-rose-50 p-4 rounded-2xl border border-rose-100 shadow-sm space-y-2">
                             <h3 class="font-bold text-rose-600"><i class="fa-solid fa-shield-dog mr-1"></i> 조직 관리 및 설정 (리더진 전용)</h3>
                             <p class="text-slate-600">조직 대표 이미지, 선도 위반 사유(추가/수정/삭제) 및 조직원 역할을 관리합니다.</p>
@@ -1845,9 +1878,17 @@
 
         function renderSwapList() {
             const container=document.getElementById('swap-list'); if(!container)return;
-            const list=dbCache.swaps[dbCache.currentOrgCode]||[];
-            if(!list.length){container.innerHTML='<p class="text-center text-xs text-slate-400 py-6">등록된 대타 스왑 요청이 없습니다.</p>';return;}
-            container.innerHTML=list.map(s=>`<div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2 text-xs"><div class="flex justify-between"><b>${s.user}${s.acceptedBy?' ↔ '+s.acceptedBy:''}</b><span class="text-indigo-600">${s.date}</span></div><p>${s.reason||'사유 없음'}</p><p class="font-bold ${s.status==='완료'?'text-emerald-600':'text-amber-600'}">${s.status}</p>${s.status!=='완료'&&s.user!==dbCache.currentUser.name?`<button onclick="acceptSwap(${s.id})" class="w-full py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold">이 날짜만 스왑 수락</button>`:''}</div>`).join('');
+            const list=(dbCache.swaps[dbCache.currentOrgCode]||[]).filter(s=>s.status!=='완료');
+            if(!list.length){container.innerHTML='<p class="text-center text-xs text-slate-400 py-6">대기 중인 대타 스왑 요청이 없습니다.</p>';return;}
+            container.innerHTML=list.map(s=>`<div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2 text-xs"><div class="flex justify-between"><b>${s.user}</b><span class="text-indigo-600">${s.date}</span></div><p>${s.reason||'사유 없음'}</p><p class="font-bold text-amber-600">대기중</p><div class="flex gap-2">${s.user!==dbCache.currentUser.name?`<button onclick="acceptSwap(${s.id})" class="flex-1 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold">이 날짜만 스왑 수락</button>`:''}${s.user===dbCache.currentUser.name?`<button onclick="deleteMySwap(${s.id})" class="flex-1 py-2 bg-rose-50 text-rose-600 rounded-xl font-bold">내 요청 삭제</button>`:''}</div></div>`).join('');
+        }
+
+        function deleteMySwap(id){
+            const list=dbCache.swaps[dbCache.currentOrgCode]||[]; const s=list.find(x=>x.id===id);
+            if(!s || s.user!==dbCache.currentUser.name || s.status==='완료') return showAlert('삭제할 수 없는 요청입니다.');
+            if(!confirm('이 대타 요청을 삭제하시겠습니까?')) return;
+            dbCache.swaps[dbCache.currentOrgCode]=list.filter(x=>x.id!==id);
+            syncSubColToFirestore('swaps',dbCache.currentOrgCode,dbCache.swaps[dbCache.currentOrgCode]); renderSwapList(); showAlert('대타 요청이 삭제되었습니다.');
         }
 
         function acceptSwap(id) {
@@ -1902,22 +1943,18 @@
             showAlert('공지사항이 등록되었습니다.');
         }
 
+        function deleteNotice(id){
+            if(!currentUserIsAdmin()) return showAlert('관리자만 공지를 삭제할 수 있습니다.');
+            if(!confirm('이 공지를 삭제하시겠습니까?')) return;
+            const list=dbCache.notices[dbCache.currentOrgCode]||[]; dbCache.notices[dbCache.currentOrgCode]=list.filter(n=>n.id!==id);
+            syncSubColToFirestore('notices',dbCache.currentOrgCode,dbCache.notices[dbCache.currentOrgCode]); renderNoticeList(); updateHomeDashboardData(); showAlert('공지가 삭제되었습니다.');
+        }
+
         function renderNoticeList() {
-            const container = document.getElementById('notice-list');
-            const list = dbCache.notices[dbCache.currentOrgCode] || [];
-            if (list.length === 0) {
-                container.innerHTML = '<p class="text-center text-xs text-slate-400 py-8">등록된 공지사항이 없습니다.</p>';
-                return;
-            }
-            container.innerHTML = list.map(n => `
-                <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1.5 text-xs">
-                    <div class="flex justify-between items-center font-bold text-slate-800">
-                        <span class="text-sm">${n.title}</span>
-                        <span class="text-[10px] text-slate-400">${n.date}</span>
-                    </div>
-                    <p class="text-slate-600 leading-relaxed whitespace-pre-line">${n.content}</p>
-                </div>
-            `).join('');
+            const container = document.getElementById('notice-list'); const list = dbCache.notices[dbCache.currentOrgCode] || [];
+            if (!list.length) { container.innerHTML = '<p class="text-center text-xs text-slate-400 py-8">등록된 공지사항이 없습니다.</p>'; return; }
+            const admin=currentUserIsAdmin();
+            container.innerHTML = list.map(n => `<div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1.5 text-xs"><div class="flex justify-between items-start font-bold text-slate-800"><span class="text-sm">${n.title}</span><div class="flex items-center gap-2"><span class="text-[10px] text-slate-400">${n.date||''}</span>${admin?`<button onclick="deleteNotice(${n.id})" class="text-rose-600 text-[11px]">삭제</button>`:''}</div></div><p class="text-slate-600 leading-relaxed whitespace-pre-line">${n.content}</p></div>`).join('');
         }
 
         function getEffectiveDutyForDate(name,dateStr){
@@ -2072,6 +2109,70 @@
             openAdminModal();
             showMainApp();
             showAlert(`${targetName} 님의 직책이 '${newRole}'(으)로 변경되었습니다.`);
+        }
+
+
+        function currentUserIsAdmin(){
+            const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
+            const mem=org?.members.find(m=>m.name===dbCache.currentUser?.name);
+            return ['단장','전교회장','부단장','전교부회장'].includes(mem?.role);
+        }
+
+        async function changeMyPassword(){
+            const pw=document.getElementById('new-password')?.value||'';
+            if(pw.length<6) return showAlert('새 비밀번호는 6자 이상이어야 합니다.');
+            const sb=requireSupabase(); if(!sb)return;
+            const {error}=await sb.auth.updateUser({password:pw});
+            if(error) return showAlert('비밀번호 변경 실패: '+error.message);
+            document.getElementById('new-password').value=''; showAlert('비밀번호가 변경되었습니다.');
+        }
+
+        async function resetMemberPassword(){
+            if(!currentUserIsAdmin()) return showAlert('관리자만 이용할 수 있습니다.');
+            const targetName=document.getElementById('reset-member-name')?.value; if(!targetName)return showAlert('회원을 선택해주세요.');
+            if(!confirm(`${targetName} 님의 비밀번호를 123456으로 초기화하시겠습니까?`)) return;
+            const sb=requireSupabase(); if(!sb)return;
+            const {data,error}=await sb.functions.invoke('reset-member-password',{body:{orgCode:dbCache.currentOrgCode,targetName}});
+            if(error || !data?.ok) return showAlert(data?.error||error?.message||'비밀번호 초기화에 실패했습니다. 서버 함수를 먼저 배포해주세요.');
+            showAlert(`${targetName} 님의 비밀번호가 123456으로 초기화되었습니다.`);
+        }
+
+        function openPollModal(){
+            if(!currentUserIsAdmin()) return showAlert('관리자만 투표를 만들 수 있습니다.');
+            ['poll-title','poll-details','poll-options'].forEach(id=>document.getElementById(id).value='');
+            document.getElementById('poll-anonymous').checked=true; document.getElementById('poll-show-results').checked=true; openModal('poll-modal');
+        }
+        function createPoll(){
+            if(!currentUserIsAdmin()) return showAlert('관리자만 투표를 만들 수 있습니다.');
+            const title=document.getElementById('poll-title').value.trim(), details=document.getElementById('poll-details').value.trim();
+            const options=document.getElementById('poll-options').value.split('\n').map(x=>x.trim()).filter(Boolean);
+            if(!title || options.length<2) return showAlert('투표 제목과 2개 이상의 선택지를 입력해주세요.');
+            const poll={id:Date.now(),title,details,options,anonymous:document.getElementById('poll-anonymous').checked,showResults:document.getElementById('poll-show-results').checked,votes:{},createdAt:new Date().toISOString()};
+            (dbCache.polls[dbCache.currentOrgCode] ||= []).unshift(poll);
+            syncSubColToFirestore('polls',dbCache.currentOrgCode,dbCache.polls[dbCache.currentOrgCode]);
+            createSystemNotice(`새 투표: ${title}`,`${details?details+'\
+':''}회의소집 메뉴에서 투표에 참여해주세요.`);
+            closeModal('poll-modal'); renderPollList(); showAlert('투표가 등록되고 공지되었습니다.');
+        }
+        function castPollVote(pid,index){
+            const list=dbCache.polls[dbCache.currentOrgCode]||[], p=list.find(x=>x.id===pid); if(!p)return;
+            p.votes ||= {}; p.votes[dbCache.currentUser.name]=Number(index);
+            syncSubColToFirestore('polls',dbCache.currentOrgCode,list); renderPollList(); showAlert('투표가 저장되었습니다. 다시 선택하면 표가 변경됩니다.');
+        }
+        function deletePoll(id){
+            if(!currentUserIsAdmin()) return showAlert('관리자만 투표를 삭제할 수 있습니다.');
+            if(!confirm('이 투표를 삭제하시겠습니까?'))return;
+            dbCache.polls[dbCache.currentOrgCode]=(dbCache.polls[dbCache.currentOrgCode]||[]).filter(p=>p.id!==id);
+            syncSubColToFirestore('polls',dbCache.currentOrgCode,dbCache.polls[dbCache.currentOrgCode]); renderPollList(); showAlert('투표가 삭제되었습니다.');
+        }
+        function renderPollList(){
+            const c=document.getElementById('poll-list'); if(!c)return; const list=dbCache.polls[dbCache.currentOrgCode]||[]; const admin=currentUserIsAdmin();
+            if(!list.length){c.innerHTML='<p class="text-center text-xs text-slate-400 py-5">등록된 투표가 없습니다.</p>';return;}
+            const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode), memberCount=org?.members?.length||0;
+            c.innerHTML=list.map(p=>{ p.votes ||= {}; const total=Object.keys(p.votes).length, my=p.votes[dbCache.currentUser.name]; const counts=p.options.map((_,i)=>Object.values(p.votes).filter(v=>Number(v)===i).length);
+                const show=p.showResults||admin; const voterDetails=admin&&!p.anonymous?Object.entries(p.votes).map(([n,v])=>`<div>${n} → ${p.options[Number(v)]||'-'}</div>`).join(''):'';
+                return `<div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2 text-xs"><div class="flex justify-between gap-2"><div><b class="text-sm">${p.title}</b><div class="text-slate-400 mt-1">${p.anonymous?'익명 투표':'기명 투표'}${p.showResults?' · 결과 공개':' · 결과 비공개'}</div></div>${admin?`<button onclick="deletePoll(${p.id})" class="text-rose-600 font-bold">삭제</button>`:''}</div>${p.details?`<p class="bg-slate-50 p-2 rounded-lg whitespace-pre-line">${p.details}</p>`:''}<div class="space-y-2">${p.options.map((o,i)=>{const pct=total?Math.round(counts[i]/total*100):0;return `<button onclick="castPollVote(${p.id},${i})" class="w-full text-left p-2.5 rounded-xl border ${Number(my)===i?'border-indigo-600 bg-indigo-50':'border-slate-200'}"><b>${o}</b>${show?`<div class="text-slate-500 mt-1">${counts[i]}표 · ${pct}%</div>`:''}</button>`}).join('')}</div>${show?`<div class="text-slate-500">투표율: ${memberCount?Math.round(total/memberCount*100):0}% (${total}/${memberCount}명)</div>`:'<div class="text-slate-400">관리자 설정에 따라 결과는 공개되지 않습니다.</div>'}${voterDetails?`<div class="bg-slate-50 p-2 rounded-xl"><b>기명 투표 상세</b>${voterDetails}</div>`:''}</div>`;
+            }).join('');
         }
     </script>
 </body>
