@@ -1625,8 +1625,8 @@
                         ${isAdmin ? `
                         <div class="bg-indigo-50 p-4 rounded-2xl border border-indigo-100 shadow-sm space-y-2">
                             <h3 class="font-bold text-indigo-700"><i class="fa-solid fa-users mr-1"></i> 학생회 전체 인원</h3>
-                            <p class="text-slate-600">이름(직책), 학년·반·번호와 현재 지도 요일을 확인할 수 있습니다.</p>
-                            <button onclick="openMemberDirectory()" class="w-full py-2.5 bg-indigo-600 text-white rounded-xl font-bold">전체 인원 보기</button>
+                            <p class="text-slate-600">이름(직책), 학년·반·번호와 현재 지도 요일을 확인하고 관리자는 조직 참여 인원을 관리할 수 있습니다.</p>
+                            <button onclick="openMemberDirectory()" class="w-full py-2.5 bg-indigo-600 text-white rounded-xl font-bold">전체 인원 보기 / 관리</button>
                         </div>
                         <div class="bg-amber-50 p-4 rounded-2xl border border-amber-100 shadow-sm space-y-2">
                             <h3 class="font-bold text-amber-700">회원 비밀번호 초기화</h3>
@@ -2968,9 +2968,51 @@
         function openMemberDirectory(){
             if(!currentUserIsAdmin())return showAlert('관리자만 전체 인원 관리 창을 열 수 있습니다.');
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode),el=document.getElementById('member-directory-list');if(!org||!el)return;
-            el.innerHTML=(org.members||[]).map(m=>{const p=memberProfile(m.name),days=memberDutyDays(m.name);return`<div class="bg-slate-50 border rounded-2xl p-3 text-xs"><div class="flex gap-3 items-center"><img src="${p.profile_image||'https://placehold.co/72x72/e0e7ff/4f46e5?text=ME'}" class="w-11 h-11 rounded-full object-cover border"><div class="flex-1 min-w-0"><div class="font-bold text-sm">${m.name} <span class="text-indigo-600">(${m.role})</span></div><div class="text-slate-500 mt-1">${p.grade||'-'} · ${p.class||'-'} · ${p.number||'-'}</div><div class="mt-1"><b>지도 요일</b> ${days.length?days.join(', '):'배정 없음'}</div></div></div></div>`}).join('')||'<p class="text-slate-400 text-center py-8">조직원이 없습니다.</p>';
+            el.innerHTML=(org.members||[]).map(m=>{const p=memberProfile(m.name),days=memberDutyDays(m.name);return`<div class="bg-slate-50 border rounded-2xl p-3 text-xs"><div class="flex gap-3 items-center"><img src="${p.profile_image||'https://placehold.co/72x72/e0e7ff/4f46e5?text=ME'}" class="w-11 h-11 rounded-full object-cover border"><div class="flex-1 min-w-0"><div class="font-bold text-sm">${m.name} <span class="text-indigo-600">(${m.role})</span></div><div class="text-slate-500 mt-1">${p.grade||'-'} · ${p.class||'-'} · ${p.number||'-'}</div><div class="mt-1"><b>지도 요일</b> ${days.length?days.join(', '):'배정 없음'}</div></div>${currentUserIsAdmin()&&m.name!==dbCache.currentUser.name?`<button onclick="removeOrgMember(${JSON.stringify(m.name)})" class="px-2.5 py-2 bg-rose-100 text-rose-600 rounded-xl font-bold whitespace-nowrap">조직에서 제외</button>`:''}</div></div>`}).join('')||'<p class="text-slate-400 text-center py-8">조직원이 없습니다.</p>';
             openModal('member-directory-modal');
         }
+        async function removeOrgMember(name){
+            if(!currentUserIsAdmin()){
+                return showAlert('관리자만 조직 참여 인원을 관리할 수 있습니다.');
+            }
+            if(name===dbCache.currentUser?.name){
+                return showAlert('본인은 이 기능으로 조직에서 제외할 수 없습니다.');
+            }
+
+            const ok=confirm(
+                `${name} 님을 이 조직의 참여 인원에서 제외하시겠습니까?\n\n계정 자체는 삭제되지 않으며, 이 조직에서만 제외됩니다.`
+            );
+            if(!ok)return;
+
+            const sb=requireSupabase();
+            if(!sb)return;
+
+            try{
+                const {data,error}=await sb.rpc('remove_member_from_org',{
+                    p_org_code:dbCache.currentOrgCode,
+                    p_member_name:name
+                });
+                if(error)throw error;
+                if(!data?.ok)throw new Error(data?.message||'조직원 제외 처리에 실패했습니다.');
+
+                const loaded=await loadAllFromSupabase();
+                if(!loaded)throw new Error('최신 조직 정보를 불러오지 못했습니다.');
+
+                if(currentOrg()?.members?.some(m=>m.name===name)){
+                    throw new Error('조직 참여 인원 목록에서 아직 제거되지 않았습니다.');
+                }
+
+                if(document.getElementById('member-directory-modal')?.classList.contains('show')){
+                    openMemberDirectory();
+                }
+
+                showAlert(`${name} 님을 조직 참여 인원에서 제외했습니다.\n해당 사용자의 계정은 삭제되지 않았습니다.`);
+            }catch(e){
+                console.error('조직원 제외 실패:',e);
+                showAlert('조직원 제외 실패: '+(e?.message||e));
+            }
+        }
+
         async function syncMyMemberMetadata(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode),m=org?.members?.find(x=>x.name===dbCache.currentUser?.name);if(!m||!dbCache.currentUser)return;
             const vals={grade:dbCache.currentUser.grade||'',class:dbCache.currentUser.class||'',number:dbCache.currentUser.number||''};
@@ -3088,7 +3130,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=22',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=23',{scope:'./',updateViaCache:'none'});
         }
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
@@ -3201,7 +3243,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=22',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=23',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
