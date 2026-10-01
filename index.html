@@ -11,6 +11,7 @@
     <meta name="theme-color" content="#4f46e5">
 
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -615,8 +616,13 @@
                     기존 출석·회의 기록은 삭제하지 않고, 선택한 시점부터 활동 대시보드 집계만 다시 시작합니다.
                 </p>
 
+                <button onclick="exportActivityDashboardExcel()"
+                    class="w-full mt-4 py-3 bg-emerald-600 text-white rounded-xl font-bold">
+                    전체 회원 활동 데이터 엑셀 내보내기
+                </button>
+
                 <button onclick="resetAllActivityDashboards()"
-                    class="w-full mt-4 py-3 bg-rose-600 text-white rounded-xl font-bold">
+                    class="w-full mt-2 py-3 bg-rose-600 text-white rounded-xl font-bold">
                     조직 전체 인원 한번에 초기화
                 </button>
 
@@ -1586,8 +1592,8 @@
                             <div id="home-notice-preview" class="space-y-2 text-xs text-slate-600">등록된 공지가 없습니다.</div>
                         </div>
                         <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
-                            <h3 class="text-xs font-bold text-slate-700"><i class="fa-solid fa-calendar-day mr-1.5"></i> 나의 선도 지도 일정</h3>
-                            <div id="home-duty-preview" class="text-xs text-slate-500">배정된 선도 지도 일정을 확인하세요.</div>
+                            <h3 class="text-xs font-bold text-slate-700"><i class="fa-solid fa-calendar-day mr-1.5"></i> 나의 지도 일정</h3>
+                            <div id="home-duty-preview" class="text-xs text-slate-500">배정된 지도 일정을 확인하세요.</div>
                             <div id="home-attendance-alerts" class="space-y-2"></div>
                             <div class="grid grid-cols-2 gap-2 mt-1">
                                 <button onclick="openGuideAttendanceModal()" class="py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs">지도 출석하기</button>
@@ -2537,16 +2543,117 @@
             }).join('');
         }
 
+        function swapBelongsToDutySchedule(sw,target){
+            const targetName=canonicalMemberName(target.memberName);
+            const targetType=String(target.dutyType||'');
+            const targetTime=String(target.time||'');
+
+            const dateFits=(dateStr)=>{
+                if(!dateStr)return false;
+                if(dayNameFromDate(dateStr)!==target.day)return false;
+                if(target.startDate&&dateStr<target.startDate)return false;
+                if(target.endDate&&dateStr>target.endDate)return false;
+                return true;
+            };
+
+            // 요청자의 원래 지도 일정과 연결된 대체 근무
+            const requesterSide=
+                canonicalMemberName(sw.user)===targetName &&
+                dateFits(sw.date) &&
+                (!targetType||String(sw.requestDutyType||sw.dutyType||'')===targetType) &&
+                (!targetTime||String(sw.requestTime||sw.time||'')===targetTime);
+
+            // 수락자의 맞교환 원래 일정과 연결된 대체 근무
+            const accepterSide=
+                canonicalMemberName(sw.acceptedBy)===targetName &&
+                dateFits(sw.acceptedDate) &&
+                (!targetType||String(sw.acceptedDutyType||'')===targetType) &&
+                (!targetTime||String(sw.acceptedTime||'')===targetTime);
+
+            // 예전 형식의 완료 기록에는 acceptedDate가 없을 수 있어 호환 처리
+            const legacySide=
+                sw.status==='완료' &&
+                !sw.acceptedDate &&
+                dateFits(sw.date) &&
+                (
+                    canonicalMemberName(sw.user)===targetName ||
+                    canonicalMemberName(sw.acceptedBy)===targetName
+                );
+
+            return requesterSide||accepterSide||legacySide;
+        }
+
         async function deleteDutySchedule(id){
-            if (!currentUserIsAdmin()) return showAlert('관리자만 선도 일정을 삭제할 수 있습니다.');
-            const list = dbCache.duties[dbCache.currentOrgCode] || [];
-            const target = list.find(d => Number(d.id) === Number(id));
-            if (!target) return showAlert('삭제할 선도 일정을 찾지 못했습니다.');
-            if (!confirm(`${target.day} ${target.dutyType} · ${target.memberName} 일정을 삭제할까요?`)) return;
-            dbCache.duties[dbCache.currentOrgCode] = list.filter(d => Number(d.id) !== Number(id));
-            await syncSubColToFirestore('duties', dbCache.currentOrgCode, dbCache.duties[dbCache.currentOrgCode]);
-            renderDutyScheduleList(); updateHomeDashboardData();
-            showAlert('선도 일정이 삭제되었습니다.');
+            if(!currentUserIsAdmin()){
+                return showAlert('관리자만 선도 일정을 삭제할 수 있습니다.');
+            }
+
+            const dutyList=dbCache.duties[dbCache.currentOrgCode]||[];
+            const target=dutyList.find(d=>Number(d.id)===Number(id));
+
+            if(!target){
+                return showAlert('삭제할 선도 일정을 찾지 못했습니다.');
+            }
+
+            const swapList=dbCache.swaps[dbCache.currentOrgCode]||[];
+            const linkedSwaps=swapList.filter(sw=>swapBelongsToDutySchedule(sw,target));
+
+            const extra=linkedSwaps.length
+                ? `\n\n이 일정과 연결된 대체 근무 기록 ${linkedSwaps.length}건도 함께 삭제됩니다.`
+                : '';
+
+            if(!confirm(
+                `${target.day} ${target.dutyType} · ${target.memberName} 일정을 삭제할까요?${extra}`
+            )){
+                return;
+            }
+
+            const nextDuties=dutyList.filter(d=>Number(d.id)!==Number(id));
+            const nextSwaps=linkedSwaps.length
+                ? swapList.filter(sw=>!swapBelongsToDutySchedule(sw,target))
+                : swapList;
+
+            // 선도 일정부터 저장
+            const dutyOk=await syncSubColToFirestore(
+                'duties',
+                dbCache.currentOrgCode,
+                nextDuties
+            );
+
+            if(!dutyOk)return;
+
+            // 연결된 대체 근무가 있으면 기록도 같이 삭제
+            if(linkedSwaps.length){
+                const swapOk=await syncSubColToFirestore(
+                    'swaps',
+                    dbCache.currentOrgCode,
+                    nextSwaps
+                );
+
+                if(!swapOk){
+                    showAlert(
+                        '선도 일정은 삭제되었지만 대체 근무 기록 삭제에 실패했습니다.\n다시 시도해주세요.'
+                    );
+                    await loadAllFromSupabase();
+                    renderDutyScheduleList();
+                    if(currentTab==='duties')renderSwapList();
+                    updateHomeDashboardData();
+                    return;
+                }
+            }
+
+            dbCache.duties[dbCache.currentOrgCode]=nextDuties;
+            dbCache.swaps[dbCache.currentOrgCode]=nextSwaps;
+
+            renderDutyScheduleList();
+            if(currentTab==='duties')renderSwapList();
+            updateHomeDashboardData();
+
+            showAlert(
+                linkedSwaps.length
+                    ? `선도 일정과 연결된 대체 근무 기록 ${linkedSwaps.length}건을 함께 삭제했습니다.`
+                    : '선도 일정이 삭제되었습니다.'
+            );
         }
 
         function kstParts(d=new Date()){
@@ -2645,6 +2752,38 @@
             const list=dbCache.swaps[dbCache.currentOrgCode]||[],s=list.find(x=>x.id===id);if(!s||s.user!==dbCache.currentUser.name||s.status==='완료')return showAlert('삭제할 수 없는 요청입니다.');if(!confirm('이 대체 근무 요청을 삭제하시겠습니까?'))return;
             dbCache.swaps[dbCache.currentOrgCode]=list.filter(x=>x.id!==id);await syncSubColToFirestore('swaps',dbCache.currentOrgCode,dbCache.swaps[dbCache.currentOrgCode]);renderSwapList();showAlert('대체 근무 요청이 삭제되었습니다.');
         }
+        async function reconcileAttendanceAfterSwap(sw){
+            const list=(dbCache.guideAttendance[dbCache.currentOrgCode]||[]);
+            if(!list.length)return;
+
+            const affected=[
+                {name:canonicalMemberName(sw.user),date:sw.date},
+                {name:canonicalMemberName(sw.acceptedBy),date:sw.acceptedDate}
+            ].filter(x=>x.name&&x.date);
+
+            let changed=false;
+            for(const a of list){
+                if(a.deleted||a.status!=='결석'||!a.auto)continue;
+                const hit=affected.some(x=>x.name===canonicalMemberName(a.user)&&x.date===a.date);
+                if(!hit)continue;
+
+                // 대체 근무 확정 후 그 날짜가 더 이상 본인의 실제 일정이 아니라면
+                // 기존 자동 결석 기록을 무효화합니다.
+                const stillAssigned=getEffectiveDutyForDate(a.user,a.date).some(d=>(!a.type||d.dutyType===a.type)&&(!a.time||d.time===a.time));
+                if(!stillAssigned){
+                    a.deleted=true;
+                    a.dismissedByAdmin=true;
+                    a.deletedAt=new Date().toISOString();
+                    a.swapAdjusted=true;
+                    changed=true;
+                }
+            }
+
+            if(changed){
+                await syncSubColToFirestore('guide_attendance',dbCache.currentOrgCode,list);
+            }
+        }
+
         async function acceptSwap(id){
             if(refreshInFlight)return showAlert('동기화 중입니다. 잠시 후 다시 눌러주세요.');
 
@@ -2677,6 +2816,10 @@
 
             const ok=await syncSubColToFirestore('swaps',dbCache.currentOrgCode,list);
             if(!ok)return;
+
+            // 대체 근무가 확정되면 출석 기준도 즉시 바뀐 실제 일정으로 맞춥니다.
+            // 원래 날짜에는 출석/결석 의무가 없고, 바뀐 날짜에만 출석합니다.
+            await reconcileAttendanceAfterSwap(s);
 
             // 매칭이 서버에 저장된 뒤 요청자 본인에게만 푸시 알림
             await sendCouncilPush(
@@ -2920,6 +3063,127 @@
             });return effective;
         }
 
+        function getActivityDashboardMetrics(name){
+            const resetAt=getDashboardResetAtForMember(name);
+            const att=(dbCache.guideAttendance[dbCache.currentOrgCode]||[]);
+            const meets=(dbCache.meetings[dbCache.currentOrgCode]||[]).filter(x=>x.scope!=='department');
+
+            const validAttendance=att.filter(a=>
+                !a.deleted &&
+                canonicalMemberName(a.user)===canonicalMemberName(name) &&
+                a.status!=='결석' &&
+                (!resetAt || new Date(a.createdAt||`${a.date}T${a.time||'00:00'}`).getTime()>=resetAt)
+            );
+
+            const meetingAttendance=meets.filter(m=>{
+                if(m.rsvps?.[name]!=='참석')return false;
+                if(!resetAt)return true;
+                const idTime=Number(m.id);
+                const eventTime=Number.isFinite(idTime)&&idTime>100000000000
+                    ? idTime
+                    : Date.parse(m.createdAt||m.time||'');
+                return Number.isFinite(eventTime)&&eventTime>=resetAt;
+            }).length;
+
+            return {
+                guideAttendance:validAttendance.length,
+                meetingAttendance,
+                activityHours:validAttendance.length,
+                resetAt
+            };
+        }
+
+        function safeExcelFilePart(v){
+            return String(v||'학생회').replace(/[\\/:*?"<>|]/g,'_').trim()||'학생회';
+        }
+
+        function exportActivityDashboardExcel(){
+            if(!currentUserIsAdmin()){
+                return showAlert('관리자만 전체 회원 활동 데이터를 내보낼 수 있습니다.');
+            }
+            if(typeof XLSX==='undefined'){
+                return showAlert('엑셀 내보내기 기능을 불러오지 못했습니다. 인터넷 연결 후 다시 시도해주세요.');
+            }
+
+            const org=currentOrg();
+            if(!org)return showAlert('조직 정보를 찾을 수 없습니다.');
+            if(!(org.members||[]).length)return showAlert('내보낼 조직원이 없습니다.');
+
+            const rows=(org.members||[]).map((m,index)=>{
+                const p=memberProfile(m.name);
+                const metric=getActivityDashboardMetrics(m.name);
+                return {
+                    '번호':index+1,
+                    '이름':m.name,
+                    '직책':m.role||'',
+                    '학년':p.grade||'',
+                    '반':p.class||'',
+                    '번호(학번)':p.number||'',
+                    '지도 출석(회)':metric.guideAttendance,
+                    '회의 참석(회)':metric.meetingAttendance,
+                    '활동 시간(시간)':metric.activityHours,
+                    '대시보드 집계 시작 시점':metric.resetAt?formatDashboardResetAt(metric.resetAt):'전체 기간'
+                };
+            });
+
+            const wb=XLSX.utils.book_new();
+            const ws=XLSX.utils.json_to_sheet(rows);
+            ws['!cols']=[
+                {wch:6},{wch:12},{wch:12},{wch:9},{wch:9},{wch:12},
+                {wch:14},{wch:14},{wch:16},{wch:24}
+            ];
+            XLSX.utils.book_append_sheet(wb,ws,'활동 대시보드');
+
+            const attendance=(dbCache.guideAttendance[dbCache.currentOrgCode]||[])
+                .filter(a=>!a.deleted)
+                .map(a=>({
+                    '이름':a.user||'',
+                    '날짜':a.date||'',
+                    '지도 종류':a.type||'',
+                    '시간':a.time||'',
+                    '상태':attendanceStatusLabel(a),
+                    '자동 기록':a.auto?'예':'아니오'
+                }));
+            if(attendance.length){
+                const aws=XLSX.utils.json_to_sheet(attendance);
+                aws['!cols']=[{wch:12},{wch:12},{wch:16},{wch:10},{wch:10},{wch:10}];
+                XLSX.utils.book_append_sheet(wb,aws,'지도 출석 상세');
+            }
+
+            const meetingRows=[];
+            (dbCache.meetings[dbCache.currentOrgCode]||[]).filter(x=>x.scope!=='department').forEach(m=>{
+                (org.members||[]).forEach(member=>{
+                    const status=m.rsvps?.[member.name];
+                    if(!status)return;
+                    meetingRows.push({
+                        '회의':m.title||'',
+                        '일시':String(m.time||'').replace('T',' '),
+                        '장소':m.loc||'',
+                        '이름':member.name,
+                        '응답':status,
+                        '불참 사유':m.rsvpReasons?.[member.name]||''
+                    });
+                });
+            });
+            if(meetingRows.length){
+                const mws=XLSX.utils.json_to_sheet(meetingRows);
+                mws['!cols']=[{wch:24},{wch:20},{wch:16},{wch:12},{wch:10},{wch:28}];
+                XLSX.utils.book_append_sheet(wb,mws,'회의 참석 상세');
+            }
+
+            const array=XLSX.write(wb,{bookType:'xlsx',type:'array'});
+            const blob=new Blob([array],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+            const url=URL.createObjectURL(blob);
+            const a=document.createElement('a');
+            a.href=url;
+            a.download=`${safeExcelFilePart(org.name)}_활동대시보드_${localDateStr()}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(()=>URL.revokeObjectURL(url),1500);
+            showAlert('전체 회원 활동 데이터를 엑셀 파일로 만들었습니다.');
+        }
+
         function getDashboardResetAtForMember(name){
             const org=currentOrg();
             if(!org)return 0;
@@ -3053,11 +3317,9 @@
 
         function updateHomeDashboardData(){
             checkAttendanceDeadlines().then(()=>{ renderHomeAttendanceAlerts(); if(currentTab==='duties'&&currentUserIsAdmin()) renderGuideAttendanceReport(); });
-            const meets=(dbCache.meetings[dbCache.currentOrgCode]||[]).filter(x=>x.scope!=='department'), att=dbCache.guideAttendance[dbCache.currentOrgCode]||[], notices=(dbCache.notices[dbCache.currentOrgCode]||[]).filter(x=>x.scope!=='department');
-            const resetAt=getDashboardResetAtForMember(dbCache.currentUser.name);
-            const myValidAtt=att.filter(a=>!a.deleted&&a.user===dbCache.currentUser.name&&a.status!=='결석'&&(!resetAt||new Date(a.createdAt||`${a.date}T${a.time||'00:00'}`).getTime()>=resetAt));
-            const myAtt=myValidAtt.length, myMeets=meets.filter(m=>m.rsvps?.[dbCache.currentUser.name]==='참석'&&(!resetAt||Number(m.id)>=resetAt)).length;
-            document.getElementById('dash-crack').innerText=`${myAtt}회`; document.getElementById('dash-meeting').innerText=`${myMeets}회`; document.getElementById('dash-time').innerText=`${myAtt}시간`;
+            const meets=(dbCache.meetings[dbCache.currentOrgCode]||[]).filter(x=>x.scope!=='department'), notices=(dbCache.notices[dbCache.currentOrgCode]||[]).filter(x=>x.scope!=='department');
+            const myMetrics=getActivityDashboardMetrics(dbCache.currentUser.name);
+            document.getElementById('dash-crack').innerText=`${myMetrics.guideAttendance}회`; document.getElementById('dash-meeting').innerText=`${myMetrics.meetingAttendance}회`; document.getElementById('dash-time').innerText=`${myMetrics.activityHours}시간`;
             const latest=meets[0]; document.getElementById('home-meeting-preview').innerHTML=latest?`<b>${latest.title}</b> (${latest.loc} / ${latest.time.replace('T',' ')})${latest.details?`<div class="mt-1 text-slate-500 whitespace-pre-line">${latest.details}</div>`:''}`:'추가 일정 없음';
             const np=document.getElementById('home-notice-preview'); if(np) np.innerHTML=notices.length?notices.slice(0,5).map(n=>`<div class="border-t pt-2"><b>${n.title}</b><p class="text-slate-500 whitespace-pre-line">${n.content}</p><span class="text-[10px] text-slate-400">${n.date||''}</span></div>`).join(''):'등록된 공지가 없습니다.';
             const rows=[], dutyRows=(dbCache.duties[dbCache.currentOrgCode]||[]).filter(x=>x.kind!=='pause');
@@ -3414,7 +3676,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=27',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=29',{scope:'./',updateViaCache:'none'});
         }
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
@@ -3527,7 +3789,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=27',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=29',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
