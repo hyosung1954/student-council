@@ -2837,9 +2837,39 @@
             showAlert('대체 근무 요청을 등록했습니다. 전체 공지와 푸시 알림으로 안내했습니다.');
         }
         function renderSwapList(){
-            const container=document.getElementById('swap-list');if(!container)return;const list=(dbCache.swaps[dbCache.currentOrgCode]||[]).filter(s=>s.status!=='완료');
-            if(!list.length){container.innerHTML='<p class="text-center text-xs text-slate-400 py-6">대기 중인 대체 근무 요청이 없습니다.</p>';return;}
-            container.innerHTML=list.map(s=>`<div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2 text-xs"><div class="flex justify-between"><b>${s.user}</b><span class="text-indigo-600">${s.date} · ${s.time||''}</span></div><p>${s.dutyType||''} · ${s.reason||'사유 없음'}</p><p class="font-bold text-amber-600">대기중</p><div class="flex gap-2">${s.user!==dbCache.currentUser.name?`<button onclick="acceptSwap(${s.id})" class="flex-1 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold">가장 빠른 일정끼리 맞교환</button>`:''}${s.user===dbCache.currentUser.name?`<button onclick="deleteMySwap(${s.id})" class="flex-1 py-2 bg-rose-50 text-rose-600 rounded-xl font-bold">내 요청 삭제</button>`:''}</div></div>`).join('');
+            const container=document.getElementById('swap-list');
+            if(!container)return;
+
+            const list=(dbCache.swaps[dbCache.currentOrgCode]||[])
+                .filter(s=>s.status!=='완료');
+
+            if(!list.length){
+                container.innerHTML='<p class="text-center text-xs text-slate-400 py-6">대기 중인 대체 근무 요청이 없습니다.</p>';
+                return;
+            }
+
+            container.innerHTML=list.map(s=>`
+                <div
+                    data-swap-card="${String(s.id)}"
+                    class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2 text-xs transition">
+                    <div class="flex justify-between">
+                        <b>${s.user}</b>
+                        <span class="text-indigo-600">${s.date} · ${s.time||''}</span>
+                    </div>
+                    <p>${s.dutyType||''} · ${s.reason||'사유 없음'}</p>
+                    <p class="font-bold text-amber-600">대기중</p>
+                    <div class="flex gap-2">
+                        ${s.user!==dbCache.currentUser.name
+                            ? `<button onclick="acceptSwap(${s.id})" class="flex-1 py-2 bg-indigo-600 text-white rounded-xl font-bold">대체 근무 수락</button>`
+                            : ''
+                        }
+                        ${s.user===dbCache.currentUser.name
+                            ? `<button onclick="deleteMySwap(${s.id})" class="flex-1 py-2 bg-rose-50 text-rose-600 rounded-xl font-bold">내 요청 삭제</button>`
+                            : ''
+                        }
+                    </div>
+                </div>
+            `).join('');
         }
         async function deleteMySwap(id){
             const list=dbCache.swaps[dbCache.currentOrgCode]||[];
@@ -3179,7 +3209,96 @@
 
         async function submitNotice(){const title=document.getElementById('notice-title').value.trim(),content=document.getElementById('notice-content').value.trim();if(!title||!content)return showAlert('제목과 내용을 모두 입력해주세요.');const ctx=noticeComposerContext,notice={id:Date.now(),title,content,date:new Date().toLocaleDateString(),author:dbCache.currentUser.name,...(ctx?{scope:'department',departmentId:ctx.departmentId,departmentName:ctx.departmentName}:{scope:'global'})};(dbCache.notices[dbCache.currentOrgCode]||=[]).unshift(notice);await syncSubColToFirestore('notices',dbCache.currentOrgCode,dbCache.notices[dbCache.currentOrgCode]);await sendCouncilPush('notice',`${ctx?ctx.departmentName+' 공지':'전체 공지'}: ${title}`,content,ctx?.targets||null,ctx?.departmentId||null);closeModal('notice-modal');noticeComposerContext=null;if(currentTab==='departments')renderDepartmentHub();else if(currentTab==='announcements')renderNoticeList();showAlert('공지사항이 등록되었습니다.');}
         function deleteNotice(id){if(!currentUserIsAdmin())return showAlert('관리자만 공지를 삭제할 수 있습니다.');if(!confirm('이 공지를 삭제하시겠습니까?'))return;dbCache.notices[dbCache.currentOrgCode]=(dbCache.notices[dbCache.currentOrgCode]||[]).filter(n=>n.id!==id);syncSubColToFirestore('notices',dbCache.currentOrgCode,dbCache.notices[dbCache.currentOrgCode]);renderNoticeList();updateHomeDashboardData();showAlert('공지가 삭제되었습니다.');}
-        function renderNoticeList(){const container=document.getElementById('notice-list');if(!container)return;const list=(dbCache.notices[dbCache.currentOrgCode]||[]).filter(x=>x.scope!=='department');if(!list.length){container.innerHTML='<p class="text-center text-xs text-slate-400 py-8">등록된 공지사항이 없습니다.</p>';return;}const admin=currentUserIsAdmin();container.innerHTML=list.map(n=>`<div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1.5 text-xs"><div class="flex justify-between items-start font-bold text-slate-800"><span class="text-sm">${n.title}</span><div class="flex items-center gap-2"><span class="text-[10px] text-slate-400">${n.date||''}</span>${admin?`<button onclick="deleteNotice(${n.id})" class="text-rose-600 text-[11px]">삭제</button>`:''}</div></div><p class="text-slate-600 leading-relaxed whitespace-pre-line">${n.content}</p></div>`).join('');}
+        async function openSwapRequestFromNotice(swapId){
+            // 최신 대체 근무 상태를 먼저 불러와 이미 매칭된 오래된 공지를 방지
+            try{ await loadAllFromSupabase(); }catch(e){}
+
+            const swap=(dbCache.swaps[dbCache.currentOrgCode]||[])
+                .find(x=>String(x.id)===String(swapId)&&x.status==='대기중');
+
+            if(!swap){
+                showAlert('이미 매칭되었거나 종료된 대체 근무 요청입니다.');
+                if(currentTab==='announcements')renderNoticeList();
+                updateHomeDashboardData();
+                return;
+            }
+
+            switchTab('duties');
+
+            setTimeout(()=>{
+                const card=document.querySelector(`[data-swap-card="${String(swapId)}"]`);
+                if(!card){
+                    showAlert('대체 근무 요청을 찾지 못했습니다.');
+                    return;
+                }
+
+                card.scrollIntoView({
+                    behavior:'smooth',
+                    block:'center'
+                });
+
+                card.classList.add(
+                    'ring-2',
+                    'ring-indigo-500',
+                    'ring-offset-2'
+                );
+
+                setTimeout(()=>{
+                    card.classList.remove(
+                        'ring-2',
+                        'ring-indigo-500',
+                        'ring-offset-2'
+                    );
+                },2200);
+            },120);
+        }
+
+        function renderNoticeList(){
+            const container=document.getElementById('notice-list');
+            if(!container)return;
+
+            const list=(dbCache.notices[dbCache.currentOrgCode]||[])
+                .filter(x=>x.scope!=='department');
+
+            if(!list.length){
+                container.innerHTML='<p class="text-center text-xs text-slate-400 py-8">등록된 공지사항이 없습니다.</p>';
+                return;
+            }
+
+            const admin=currentUserIsAdmin();
+
+            container.innerHTML=list.map(n=>{
+                const isSwap=n.source==='swap_request'&&n.swapId!==undefined&&n.swapId!==null;
+                const click=isSwap
+                    ? `onclick="openSwapRequestFromNotice(${JSON.stringify(n.swapId)})"`
+                    : '';
+
+                return `
+                    <div ${click}
+                        class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1.5 text-xs ${isSwap?'cursor-pointer hover:border-indigo-300':''}">
+                        <div class="flex justify-between items-start font-bold text-slate-800">
+                            <span class="text-sm">${n.title}</span>
+                            <div class="flex items-center gap-2">
+                                <span class="text-[10px] text-slate-400">${n.date||''}</span>
+                                ${admin
+                                    ? `<button onclick="event.stopPropagation();deleteNotice(${n.id})" class="text-rose-600 text-[11px]">삭제</button>`
+                                    : ''
+                                }
+                            </div>
+                        </div>
+                        <p class="text-slate-600 leading-relaxed whitespace-pre-line">${n.content}</p>
+                        ${isSwap
+                            ? `<div class="pt-2">
+                                <span class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 font-bold text-[11px]">
+                                    선도 일정에서 바로 수락하기 ›
+                                </span>
+                               </div>`
+                            : ''
+                        }
+                    </div>
+                `;
+            }).join('');
+        }
 
         function getEffectiveDutyForDate(name,dateStr){
             if(isDutyPausedOn(dateStr))return [];const targetName=canonicalMemberName(name),day=dayNameFromDate(dateStr);
@@ -3448,16 +3567,85 @@
         }
 
         function updateHomeDashboardData(){
-            checkAttendanceDeadlines().then(()=>{ renderHomeAttendanceAlerts(); if(currentTab==='duties'&&currentUserIsAdmin()) renderGuideAttendanceReport(); });
-            const meets=(dbCache.meetings[dbCache.currentOrgCode]||[]).filter(x=>x.scope!=='department'), notices=(dbCache.notices[dbCache.currentOrgCode]||[]).filter(x=>x.scope!=='department');
+            checkAttendanceDeadlines().then(()=>{
+                renderHomeAttendanceAlerts();
+                if(currentTab==='duties'&&currentUserIsAdmin())renderGuideAttendanceReport();
+            });
+
+            if(!dbCache.currentUser||!dbCache.currentOrgCode)return;
+
+            const meets=(dbCache.meetings[dbCache.currentOrgCode]||[]).filter(x=>x.scope!=='department');
+            const notices=(dbCache.notices[dbCache.currentOrgCode]||[]).filter(x=>x.scope!=='department');
             const myMetrics=getActivityDashboardMetrics(dbCache.currentUser.name);
-            document.getElementById('dash-crack').innerText=`${myMetrics.guideAttendance}회`; document.getElementById('dash-meeting').innerText=`${myMetrics.meetingAttendance}회`; document.getElementById('dash-time').innerText=`${myMetrics.activityHours}시간`;
-            const latest=meets[0]; document.getElementById('home-meeting-preview').innerHTML=latest?`<b>${latest.title}</b> (${latest.loc} / ${latest.time.replace('T',' ')})${latest.details?`<div class="mt-1 text-slate-500 whitespace-pre-line">${latest.details}</div>`:''}`:'추가 일정 없음';
-            const np=document.getElementById('home-notice-preview'); if(np) np.innerHTML=notices.length?notices.slice(0,5).map(n=>`<div class="border-t pt-2"><b>${n.title}</b><p class="text-slate-500 whitespace-pre-line">${n.content}</p><span class="text-[10px] text-slate-400">${n.date||''}</span></div>`).join(''):'등록된 공지가 없습니다.';
-            const rows=[], dutyRows=(dbCache.duties[dbCache.currentOrgCode]||[]).filter(x=>x.kind!=='pause');
-            let latestDutyEnd=localDateStr(); dutyRows.forEach(x=>{if((x.endDate||latestDutyEnd)>latestDutyEnd)latestDutyEnd=x.endDate||latestDutyEnd;});
-            for(let ds=localDateStr(),guard=0;ds<=latestDutyEnd&&guard<740;ds=kstDateAdd(ds,1),guard++){const eff=getEffectiveDutyForDate(dbCache.currentUser.name,ds);eff.forEach(x=>rows.push({...x,date:ds}));}
-            const dp=document.getElementById('home-duty-preview'); if(dp) dp.innerHTML=rows.length?rows.slice(0,8).map(d=>`<div class="border-t pt-2"><b>${d.date} · ${d.dutyType}</b> (${d.time})${d.originalMemberName!==d.effectiveMemberName?` <span class="text-indigo-600 font-bold">· 대체 근무 반영</span>`:''}</div>`).join(''):(getDutyPause()?`<span class="text-amber-600 font-bold">현재 ${getDutyPause().endDate}까지 지도 중지 중입니다.</span>`:'배정된 지도 일정이 없습니다.');
+
+            // 홈 화면이 현재 DOM에 없을 때도 오류가 나지 않도록 모두 존재 여부 확인
+            const dashCrack=document.getElementById('dash-crack');
+            const dashMeeting=document.getElementById('dash-meeting');
+            const dashTime=document.getElementById('dash-time');
+
+            if(dashCrack)dashCrack.innerText=`${myMetrics.guideAttendance}회`;
+            if(dashMeeting)dashMeeting.innerText=`${myMetrics.meetingAttendance}회`;
+            if(dashTime)dashTime.innerText=`${myMetrics.activityHours}시간`;
+
+            const latest=meets[0];
+            const meetingPreview=document.getElementById('home-meeting-preview');
+
+            if(meetingPreview){
+                meetingPreview.innerHTML=latest
+                    ? `<b>${latest.title}</b> (${latest.loc} / ${latest.time.replace('T',' ')})${latest.details?`<div class="mt-1 text-slate-500 whitespace-pre-line">${latest.details}</div>`:''}`
+                    : '추가 일정 없음';
+            }
+
+            const np=document.getElementById('home-notice-preview');
+            if(np){
+                np.innerHTML=notices.length
+                    ? notices.slice(0,5).map(n=>{
+                        const isSwap=n.source==='swap_request'&&n.swapId!==undefined&&n.swapId!==null;
+                        return `
+                            <div
+                                ${isSwap?`onclick="event.stopPropagation();openSwapRequestFromNotice(${JSON.stringify(n.swapId)})"`:''}
+                                class="border-t pt-2 ${isSwap?'cursor-pointer':''}">
+                                <b>${n.title}</b>
+                                <p class="text-slate-500 whitespace-pre-line">${n.content}</p>
+                                <div class="flex items-center justify-between gap-2 mt-1">
+                                    <span class="text-[10px] text-slate-400">${n.date||''}</span>
+                                    ${isSwap
+                                        ? `<span class="text-[10px] font-bold text-indigo-600">바로 수락하기 ›</span>`
+                                        : ''
+                                    }
+                                </div>
+                            </div>
+                        `;
+                    }).join('')
+                    : '등록된 공지가 없습니다.';
+            }
+
+            const rows=[];
+            const dutyRows=(dbCache.duties[dbCache.currentOrgCode]||[]).filter(x=>x.kind!=='pause');
+
+            let latestDutyEnd=localDateStr();
+            dutyRows.forEach(x=>{
+                if((x.endDate||latestDutyEnd)>latestDutyEnd)latestDutyEnd=x.endDate||latestDutyEnd;
+            });
+
+            for(
+                let ds=localDateStr(),guard=0;
+                ds<=latestDutyEnd&&guard<740;
+                ds=kstDateAdd(ds,1),guard++
+            ){
+                const eff=getEffectiveDutyForDate(dbCache.currentUser.name,ds);
+                eff.forEach(x=>rows.push({...x,date:ds}));
+            }
+
+            const dp=document.getElementById('home-duty-preview');
+            if(dp){
+                dp.innerHTML=rows.length
+                    ? rows.slice(0,8).map(d=>`<div class="border-t pt-2"><b>${d.date} · ${d.dutyType}</b> (${d.time})${d.originalMemberName!==d.effectiveMemberName?` <span class="text-indigo-600 font-bold">· 대체 근무 반영</span>`:''}</div>`).join('')
+                    : (getDutyPause()
+                        ? `<span class="text-amber-600 font-bold">현재 ${getDutyPause().endDate}까지 지도 중지 중입니다.</span>`
+                        : '배정된 지도 일정이 없습니다.');
+            }
+
             renderHomeAttendanceAlerts();
             checkGuideReminder();
         }
@@ -3808,7 +3996,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=31',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=33',{scope:'./',updateViaCache:'none'});
         }
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
@@ -3921,7 +4109,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=31',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=33',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
