@@ -2895,33 +2895,62 @@
             openModal('member-directory-modal');
         }
         async function expelMember(name){
-            if(!currentUserIsAdmin())return showAlert('관리자만 조직원을 추방할 수 있습니다.');
-            if(name===dbCache.currentUser.name)return showAlert('본인은 이 기능으로 추방할 수 없습니다.');
+            if(!currentUserIsAdmin()){
+                return showAlert('관리자만 조직원을 추방할 수 있습니다.');
+            }
+            if(name===dbCache.currentUser?.name){
+                return showAlert('본인은 이 기능으로 추방할 수 없습니다.');
+            }
 
-            const first=confirm(`${name} 님을 학생회 조직에서 추방할까요?\n지도 일정과 대기 중인 대체 근무 요청도 함께 정리됩니다.`);
+            const first=confirm(
+                `${name} 님을 학생회 조직에서 추방할까요?\n지도 일정과 대기 중인 대체 근무 요청도 함께 정리됩니다.`
+            );
             if(!first)return;
-            const second=confirm(`마지막 확인입니다.\n정말 ${name} 님을 조직에서 추방하시겠습니까?`);
+
+            const second=confirm(
+                `마지막 확인입니다.\n정말 ${name} 님을 조직에서 추방하시겠습니까?`
+            );
             if(!second)return;
 
-            const org=currentOrg();if(!org)return showAlert('조직 정보를 찾을 수 없습니다.');
+            const sb=requireSupabase();
+            if(!sb)return;
+
             try{
-                org.members=(org.members||[]).filter(m=>m.name!==name);
-                await syncOrgToFirestore(org);
+                // 브라우저에서 organizations 전체를 직접 수정하지 않고
+                // DB의 관리자 전용 함수에서 권한 확인 + 추방 + 관련 데이터 정리를 한 번에 처리합니다.
+                const {data,error}=await sb.rpc('expel_member_from_org',{
+                    p_org_code: dbCache.currentOrgCode,
+                    p_member_name: name
+                });
 
-                dbCache.duties[dbCache.currentOrgCode]=(dbCache.duties[dbCache.currentOrgCode]||[]).filter(d=>d.kind==='pause'||canonicalMemberName(d.memberName)!==name);
-                await syncSubColToFirestore('duties',dbCache.currentOrgCode,dbCache.duties[dbCache.currentOrgCode]);
+                if(error)throw error;
+                if(!data?.ok){
+                    throw new Error(data?.message||'추방 처리 결과를 확인할 수 없습니다.');
+                }
 
-                dbCache.swaps[dbCache.currentOrgCode]=(dbCache.swaps[dbCache.currentOrgCode]||[]).filter(x=>x.user!==name&&x.acceptedBy!==name);
-                await syncSubColToFirestore('swaps',dbCache.currentOrgCode,dbCache.swaps[dbCache.currentOrgCode]);
+                // 서버에서 다시 읽어 실제로 제거되었는지 검증
+                const loaded=await loadAllFromSupabase();
+                if(!loaded){
+                    throw new Error('추방 후 최신 조직 정보를 불러오지 못했습니다.');
+                }
 
-                await loadAllFromSupabase();
-                openMemberDirectory();
+                const stillExists=currentOrg()?.members?.some(m=>m.name===name);
+                if(stillExists){
+                    throw new Error('서버 조직원 목록에서 아직 제거되지 않았습니다.');
+                }
+
+                // 열려 있는 관리창을 최신 목록으로 다시 그림
+                if(document.getElementById('member-directory-modal')?.classList.contains('show')){
+                    openMemberDirectory();
+                }
+
                 showAlert(`${name} 님을 조직에서 추방했습니다.`);
             }catch(e){
                 console.error('조직원 추방 실패:',e);
-                showAlert('추방 처리에 실패했습니다. 잠시 후 다시 시도해주세요.');
+                showAlert('추방 처리 실패: '+(e?.message||e));
             }
         }
+
         async function syncMyMemberMetadata(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode),m=org?.members?.find(x=>x.name===dbCache.currentUser?.name);if(!m||!dbCache.currentUser)return;
             const vals={grade:dbCache.currentUser.grade||'',class:dbCache.currentUser.class||'',number:dbCache.currentUser.number||''};
@@ -3039,7 +3068,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=20',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=21',{scope:'./',updateViaCache:'none'});
         }
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
@@ -3152,7 +3181,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=20',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=21',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
