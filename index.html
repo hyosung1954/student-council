@@ -3094,7 +3094,7 @@
             }
 
             const ok=confirm(
-                `${name} 님을 이 조직의 참여 인원에서 제외하시겠습니까?\n\n계정 자체는 삭제되지 않으며, 이 조직에서만 제외됩니다.`
+                `${name} 님을 이 조직에서 제외하시겠습니까?\n\n해당 사용자의 계정은 삭제되지 않고, 현재 조직 참여 인원에서만 빠집니다.`
             );
             if(!ok)return;
 
@@ -3102,25 +3102,47 @@
             if(!sb)return;
 
             try{
-                const {data,error}=await sb.rpc('remove_member_from_org',{
-                    p_org_code:dbCache.currentOrgCode,
-                    p_member_name:name
+                // RLS에 막히지 않도록 서버 Edge Function에서 관리자 권한을 검증한 뒤
+                // organizations.members 목록에서 대상만 제거합니다.
+                const {data,error}=await sb.functions.invoke('remove-org-member',{
+                    body:{
+                        orgCode:dbCache.currentOrgCode,
+                        memberName:name
+                    }
                 });
-                if(error)throw error;
-                if(!data?.ok)throw new Error(data?.message||'조직원 제외 처리에 실패했습니다.');
 
+                if(error){
+                    let detail='';
+                    try{
+                        if(error.context){
+                            const body=await error.context.json();
+                            detail=body?.error||body?.message||'';
+                        }
+                    }catch(_){}
+                    throw new Error(detail||error.message||'조직원 제외 요청에 실패했습니다.');
+                }
+
+                if(!data?.ok){
+                    throw new Error(data?.error||'조직원 제외 처리에 실패했습니다.');
+                }
+
+                // 서버에서 최신 조직 정보를 다시 읽고 실제 제거 여부 확인
                 const loaded=await loadAllFromSupabase();
-                if(!loaded)throw new Error('최신 조직 정보를 불러오지 못했습니다.');
+                if(!loaded){
+                    throw new Error('제외 처리는 완료됐지만 최신 조직 정보를 불러오지 못했습니다. 새로고침해주세요.');
+                }
 
-                if(currentOrg()?.members?.some(m=>m.name===name)){
-                    throw new Error('조직 참여 인원 목록에서 아직 제거되지 않았습니다.');
+                const stillExists=(currentOrg()?.members||[]).some(m=>m.name===name);
+                if(stillExists){
+                    throw new Error('서버 조직 참여 인원 목록에서 아직 제거되지 않았습니다.');
                 }
 
                 if(document.getElementById('member-directory-modal')?.classList.contains('show')){
                     openMemberDirectory();
                 }
 
-                showAlert(`${name} 님을 조직 참여 인원에서 제외했습니다.\n해당 사용자의 계정은 삭제되지 않았습니다.`);
+                updateHomeDashboardData();
+                showAlert(`${name} 님을 현재 조직에서 제외했습니다.\n계정 자체는 삭제되지 않았습니다.`);
             }catch(e){
                 console.error('조직원 제외 실패:',e);
                 showAlert('조직원 제외 실패: '+(e?.message||e));
@@ -3244,7 +3266,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=24',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=25',{scope:'./',updateViaCache:'none'});
         }
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
@@ -3357,7 +3379,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=24',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=25',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
