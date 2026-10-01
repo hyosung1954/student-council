@@ -2524,7 +2524,14 @@
                                     ${currentUserIsAdmin()
                                         ? `<div class="flex gap-1 self-center">
                                             <button onclick="openDutyEditModal(${JSON.stringify(x.id)})" class="px-2 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg font-bold text-[10px]">수정</button>
-                                            <button onclick="deleteDutySchedule(${JSON.stringify(x.id)})" class="px-2 py-1.5 bg-rose-50 text-rose-600 rounded-lg font-bold text-[10px]">삭제</button>
+                                            <button
+                                                data-duty-id="${x.id}"
+                                                data-duty-date="${nextDate}"
+                                                data-actual-name="${encodeURIComponent(actualName||originalName)}"
+                                                onclick="deleteDutySchedule(this.dataset.dutyId,this.dataset.dutyDate,decodeURIComponent(this.dataset.actualName))"
+                                                class="px-2 py-1.5 bg-rose-50 text-rose-600 rounded-lg font-bold text-[10px]">
+                                                삭제
+                                            </button>
                                            </div>`
                                         : ''
                                     }
@@ -2543,10 +2550,17 @@
             }).join('');
         }
 
-        function swapBelongsToDutySchedule(sw,target){
+        function swapBelongsToDutySchedule(sw,target,displayDate=null,displayActualName=null){
             const targetName=canonicalMemberName(target.memberName);
+            const actualName=canonicalMemberName(displayActualName||'');
             const targetType=String(target.dutyType||'');
             const targetTime=String(target.time||'');
+
+            const sameTypeAndTime=(typeValue,timeValue)=>{
+                const typeOk=!targetType||!typeValue||String(typeValue)===targetType;
+                const timeOk=!targetTime||!timeValue||String(timeValue)===targetTime;
+                return typeOk&&timeOk;
+            };
 
             const dateFits=(dateStr)=>{
                 if(!dateStr)return false;
@@ -2556,73 +2570,99 @@
                 return true;
             };
 
-            // 요청자의 원래 지도 일정과 연결된 대체 근무
+            const requester=canonicalMemberName(sw.user);
+            const accepter=canonicalMemberName(sw.acceptedBy);
+
+            // 1) 요청자의 원래 일정과 직접 연결
             const requesterSide=
-                canonicalMemberName(sw.user)===targetName &&
+                requester===targetName &&
                 dateFits(sw.date) &&
-                (!targetType||String(sw.requestDutyType||sw.dutyType||'')===targetType) &&
-                (!targetTime||String(sw.requestTime||sw.time||'')===targetTime);
+                sameTypeAndTime(sw.requestDutyType||sw.dutyType,sw.requestTime||sw.time);
 
-            // 수락자의 맞교환 원래 일정과 연결된 대체 근무
+            // 2) 수락자의 원래 일정과 직접 연결
             const accepterSide=
-                canonicalMemberName(sw.acceptedBy)===targetName &&
+                accepter===targetName &&
                 dateFits(sw.acceptedDate) &&
-                (!targetType||String(sw.acceptedDutyType||'')===targetType) &&
-                (!targetTime||String(sw.acceptedTime||'')===targetTime);
+                sameTypeAndTime(sw.acceptedDutyType,sw.acceptedTime);
 
-            // 예전 형식의 완료 기록에는 acceptedDate가 없을 수 있어 호환 처리
+            // 3) 현재 화면에 '대체 근무 반영'으로 보이는 바로 그 카드와 연결
+            //    예: 기본 배정 김도웅 → 실제 근무 금시철, 2026-10-02
+            const visibleSwappedCard=
+                sw.status==='완료' &&
+                !!displayDate &&
+                !!actualName &&
+                actualName!==targetName &&
+                (
+                    (
+                        requester===targetName &&
+                        accepter===actualName &&
+                        sw.date===displayDate &&
+                        sameTypeAndTime(sw.requestDutyType||sw.dutyType,sw.requestTime||sw.time)
+                    )
+                    ||
+                    (
+                        accepter===targetName &&
+                        requester===actualName &&
+                        sw.acceptedDate===displayDate &&
+                        sameTypeAndTime(sw.acceptedDutyType,sw.acceptedTime)
+                    )
+                );
+
+            // 4) 구버전 대체 근무 데이터 호환
             const legacySide=
                 sw.status==='완료' &&
                 !sw.acceptedDate &&
                 dateFits(sw.date) &&
                 (
-                    canonicalMemberName(sw.user)===targetName ||
-                    canonicalMemberName(sw.acceptedBy)===targetName
+                    requester===targetName ||
+                    accepter===targetName
                 );
 
-            return requesterSide||accepterSide||legacySide;
+            return requesterSide||accepterSide||visibleSwappedCard||legacySide;
         }
 
-        async function deleteDutySchedule(id){
+        async function deleteDutySchedule(id,displayDate=null,displayActualName=null){
             if(!currentUserIsAdmin()){
                 return showAlert('관리자만 선도 일정을 삭제할 수 있습니다.');
             }
 
             const dutyList=dbCache.duties[dbCache.currentOrgCode]||[];
-            const target=dutyList.find(d=>Number(d.id)===Number(id));
+            const target=dutyList.find(d=>String(d.id)===String(id));
 
             if(!target){
                 return showAlert('삭제할 선도 일정을 찾지 못했습니다.');
             }
 
+            const originalName=canonicalMemberName(target.memberName);
+            const actualName=canonicalMemberName(displayActualName||originalName);
+
             const swapList=dbCache.swaps[dbCache.currentOrgCode]||[];
-            const linkedSwaps=swapList.filter(sw=>swapBelongsToDutySchedule(sw,target));
+            const linkedSwaps=swapList.filter(
+                sw=>swapBelongsToDutySchedule(sw,target,displayDate,actualName)
+            );
 
-            const extra=linkedSwaps.length
-                ? `\n\n이 일정과 연결된 대체 근무 기록 ${linkedSwaps.length}건도 함께 삭제됩니다.`
-                : '';
+            const isVisibleSwap=actualName&&actualName!==originalName;
 
-            if(!confirm(
-                `${target.day} ${target.dutyType} · ${target.memberName} 일정을 삭제할까요?${extra}`
-            )){
+            let message=`${target.day} ${target.dutyType} · ${originalName} 일정을 삭제할까요?`;
+
+            if(isVisibleSwap){
+                message+=`\n\n현재 화면에는 대체 근무가 반영되어 ${actualName} 님이 실제 근무자로 표시되어 있습니다.`;
+            }
+
+            if(linkedSwaps.length){
+                message+=`\n\n연결된 대체 근무 기록 ${linkedSwaps.length}건도 함께 삭제됩니다.`;
+            }
+
+            if(!confirm(message)){
                 return;
             }
 
-            const nextDuties=dutyList.filter(d=>Number(d.id)!==Number(id));
-            const nextSwaps=linkedSwaps.length
-                ? swapList.filter(sw=>!swapBelongsToDutySchedule(sw,target))
-                : swapList;
+            const nextDuties=dutyList.filter(d=>String(d.id)!==String(id));
+            const linkedIds=new Set(linkedSwaps.map(sw=>String(sw.id)));
+            const nextSwaps=swapList.filter(sw=>!linkedIds.has(String(sw.id)));
 
-            // 선도 일정부터 저장
-            const dutyOk=await syncSubColToFirestore(
-                'duties',
-                dbCache.currentOrgCode,
-                nextDuties
-            );
-
-            if(!dutyOk)return;
-
-            // 연결된 대체 근무가 있으면 기록도 같이 삭제
+            // 먼저 대체 근무 기록 삭제
+            // → 화면의 '대체 근무 반영' 상태가 남지 않게 함
             if(linkedSwaps.length){
                 const swapOk=await syncSubColToFirestore(
                     'swaps',
@@ -2631,15 +2671,29 @@
                 );
 
                 if(!swapOk){
-                    showAlert(
-                        '선도 일정은 삭제되었지만 대체 근무 기록 삭제에 실패했습니다.\n다시 시도해주세요.'
-                    );
-                    await loadAllFromSupabase();
-                    renderDutyScheduleList();
-                    if(currentTab==='duties')renderSwapList();
-                    updateHomeDashboardData();
-                    return;
+                    return showAlert('연결된 대체 근무 기록 삭제에 실패했습니다.\n선도 일정은 삭제하지 않았습니다.');
                 }
+            }
+
+            // 그 다음 선도 일정 삭제
+            const dutyOk=await syncSubColToFirestore(
+                'duties',
+                dbCache.currentOrgCode,
+                nextDuties
+            );
+
+            if(!dutyOk){
+                // 일정 삭제에 실패하면 최신 서버 상태를 다시 읽음
+                await loadAllFromSupabase();
+                renderDutyScheduleList();
+                if(currentTab==='duties')renderSwapList();
+                updateHomeDashboardData();
+
+                return showAlert(
+                    linkedSwaps.length
+                        ? '대체 근무 기록은 삭제됐지만 선도 일정 삭제에 실패했습니다.\n다시 시도해주세요.'
+                        : '선도 일정 삭제에 실패했습니다.'
+                );
             }
 
             dbCache.duties[dbCache.currentOrgCode]=nextDuties;
@@ -3676,7 +3730,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=29',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=30',{scope:'./',updateViaCache:'none'});
         }
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
@@ -3789,7 +3843,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=29',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=30',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
