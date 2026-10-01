@@ -601,6 +601,24 @@
         
 
 
+
+        <!-- Master Admin Code -->
+        <div id="master-admin-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-center justify-center p-4">
+            <div class="modal-content bg-white w-full max-w-sm rounded-3xl p-5 relative shadow-2xl">
+                <button onclick="closeModal('master-admin-modal')" class="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+                <h3 class="text-lg font-bold text-slate-800">관리자 코드 입력</h3>
+                <p class="text-[11px] text-slate-500 mt-2">올바른 관리자 코드를 입력하면 현재 조직에서 단장 권한이 부여됩니다.</p>
+                <input id="master-admin-code" type="password" autocomplete="off" placeholder="관리자 코드"
+                    class="w-full mt-4 bg-slate-50 border border-slate-200 px-3 py-3 rounded-xl font-bold">
+                <button id="master-admin-submit" onclick="submitMasterAdminCode()"
+                    class="w-full mt-3 py-3 bg-indigo-600 text-white rounded-xl font-bold">
+                    확인
+                </button>
+            </div>
+        </div>
+
         <!-- Permanent Account Deletion -->
         <div id="delete-account-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-center justify-center p-4">
             <div class="modal-content bg-white w-full max-w-sm rounded-3xl p-5 relative shadow-2xl">
@@ -1227,6 +1245,72 @@
             showMainApp();
         }
 
+        document.addEventListener('keydown',(e)=>{
+            if(e.key==='Enter' && document.getElementById('master-admin-modal')?.classList.contains('show')){
+                e.preventDefault();
+                submitMasterAdminCode();
+            }
+        });
+
+        async function submitMasterAdminCode(){
+            const input=document.getElementById('master-admin-code');
+            const btn=document.getElementById('master-admin-submit');
+            const code=(input?.value||'').trim();
+
+            if(!code){
+                return showAlert('관리자 코드를 입력해주세요.');
+            }
+
+            const sb=requireSupabase();
+            if(!sb)return;
+
+            try{
+                if(btn){
+                    btn.disabled=true;
+                    btn.textContent='확인 중...';
+                    btn.classList.add('opacity-60');
+                }
+
+                // 마스터 코드는 브라우저에서 비교하지 않고 서버에서만 검증합니다.
+                const {data,error}=await sb.functions.invoke('claim-master-admin',{
+                    body:{
+                        orgCode:dbCache.currentOrgCode,
+                        code
+                    }
+                });
+
+                if(error)throw error;
+                if(!data?.ok){
+                    throw new Error(data?.error||'관리자 코드가 올바르지 않습니다.');
+                }
+
+                if(input)input.value='';
+                closeModal('master-admin-modal');
+
+                // 서버의 변경된 조직 정보를 다시 불러와 UI에도 즉시 단장 권한 반영
+                const loaded=await loadAllFromSupabase();
+                if(!loaded){
+                    throw new Error('권한은 변경되었지만 최신 정보를 불러오지 못했습니다. 새로고침해주세요.');
+                }
+
+                switchTab('settings');
+                showAlert('단장 관리자 권한이 부여되었습니다.');
+            }catch(e){
+                console.error('마스터 관리자 권한 부여 실패:',e);
+                if(input){
+                    input.value='';
+                    input.focus();
+                }
+                showAlert('관리자 코드 확인 실패: '+(e?.message||e));
+            }finally{
+                if(btn){
+                    btn.disabled=false;
+                    btn.textContent='확인';
+                    btn.classList.remove('opacity-60');
+                }
+            }
+        }
+
         function openDeleteAccountModal(){
             if(!dbCache.currentUser)return showAlert('로그인 정보를 확인할 수 없습니다.');
             openModal('delete-account-modal');
@@ -1380,11 +1464,41 @@
         }
 
         let bottomNavRefreshBusy=false;
+        let settingsSecretTapCount=0;
+        let settingsSecretTapTimer=null;
 
         function handleBottomNavTap(tab){
             const activeBottomTab=['records','duties','manual'].includes(currentTab)
                 ? 'discipline'
                 : currentTab;
+
+            // 설정 버튼을 짧은 시간 안에 3번 연속 누르면 관리자 코드 입력창 표시
+            if(tab==='settings'){
+                settingsSecretTapCount++;
+
+                clearTimeout(settingsSecretTapTimer);
+                settingsSecretTapTimer=setTimeout(()=>{
+                    settingsSecretTapCount=0;
+                },1800);
+
+                if(settingsSecretTapCount>=3){
+                    settingsSecretTapCount=0;
+                    clearTimeout(settingsSecretTapTimer);
+
+                    switchTab('settings');
+
+                    setTimeout(()=>{
+                        const input=document.getElementById('master-admin-code');
+                        if(input)input.value='';
+                        openModal('master-admin-modal');
+                        setTimeout(()=>input?.focus(),120);
+                    },50);
+                    return;
+                }
+            }else{
+                settingsSecretTapCount=0;
+                clearTimeout(settingsSecretTapTimer);
+            }
 
             // 홈 화면에서 홈 버튼을 한 번 더 눌렀을 때만 전체 새로고침
             if(tab==='home' && activeBottomTab==='home'){
@@ -3130,7 +3244,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=23',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=24',{scope:'./',updateViaCache:'none'});
         }
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
@@ -3243,7 +3357,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=23',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=24',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
