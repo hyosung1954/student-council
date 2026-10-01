@@ -2792,10 +2792,49 @@
             const el=document.getElementById('swap-next-assignment');if(el){el.textContent=`${d.date} · ${d.dutyType} · ${d.time}`;el._duty=d;}document.getElementById('swap-reason').value='';openModal('swap-modal');
         }
         async function submitSwap(){
-            const pending=(dbCache.swaps[dbCache.currentOrgCode]||[]).find(s=>s.user===dbCache.currentUser.name&&s.status==='대기중');if(pending)return showAlert('대체 근무 요청은 동시에 하나만 등록할 수 있습니다.');
-            const d=document.getElementById('swap-next-assignment')?._duty,reason=document.getElementById('swap-reason').value.trim();if(!d)return showAlert('맞교환할 일정을 찾지 못했습니다.');
-            const list=(dbCache.swaps[dbCache.currentOrgCode]||=[]);list.unshift({id:Date.now(),user:dbCache.currentUser.name,requesterUserId:dbCache.currentUser.id||null,date:d.date,dutyType:d.dutyType,time:d.time,reason,status:'대기중',acceptedBy:null});
-            await syncSubColToFirestore('swaps',dbCache.currentOrgCode,list);closeModal('swap-modal');if(currentTab==='duties')renderSwapList();showAlert('가장 빠른 지도 일정으로 대체 근무 요청을 등록했습니다.');
+            const pending=(dbCache.swaps[dbCache.currentOrgCode]||[]).find(s=>s.user===dbCache.currentUser.name&&s.status==='대기중');
+            if(pending)return showAlert('대체 근무 요청은 동시에 하나만 등록할 수 있습니다.');
+
+            const d=document.getElementById('swap-next-assignment')?._duty;
+            const reason=document.getElementById('swap-reason').value.trim();
+            if(!d)return showAlert('맞교환할 일정을 찾지 못했습니다.');
+
+            const swap={
+                id:Date.now(),
+                user:dbCache.currentUser.name,
+                requesterUserId:dbCache.currentUser.id||null,
+                date:d.date,
+                dutyType:d.dutyType,
+                time:d.time,
+                reason,
+                status:'대기중',
+                acceptedBy:null
+            };
+
+            const list=(dbCache.swaps[dbCache.currentOrgCode]||=[]);
+            list.unshift(swap);
+
+            const saved=await syncSubColToFirestore('swaps',dbCache.currentOrgCode,list);
+            if(!saved)return;
+
+            // 대체 근무 신청이 등록되면 서버에서 시스템 전체 공지를 만들고
+            // 공지 알림을 켠 조직원 전원에게 푸시를 보냅니다.
+            await sendCouncilPush(
+                'swap_request',
+                `대체 근무 요청 · ${dbCache.currentUser.name}`,
+                `${d.date} · ${d.dutyType} · ${d.time}\n사유: ${reason||'사유 없음'}\n선도 메뉴에서 대체 근무를 수락할 수 있습니다.`,
+                null,
+                null,
+                swap.id
+            );
+
+            await refreshAppData(false,true);
+
+            closeModal('swap-modal');
+            if(currentTab==='duties')renderSwapList();
+            updateHomeDashboardData();
+
+            showAlert('대체 근무 요청을 등록했습니다. 전체 공지와 푸시 알림으로 안내했습니다.');
         }
         function renderSwapList(){
             const container=document.getElementById('swap-list');if(!container)return;const list=(dbCache.swaps[dbCache.currentOrgCode]||[]).filter(s=>s.status!=='완료');
@@ -2803,8 +2842,37 @@
             container.innerHTML=list.map(s=>`<div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2 text-xs"><div class="flex justify-between"><b>${s.user}</b><span class="text-indigo-600">${s.date} · ${s.time||''}</span></div><p>${s.dutyType||''} · ${s.reason||'사유 없음'}</p><p class="font-bold text-amber-600">대기중</p><div class="flex gap-2">${s.user!==dbCache.currentUser.name?`<button onclick="acceptSwap(${s.id})" class="flex-1 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold">가장 빠른 일정끼리 맞교환</button>`:''}${s.user===dbCache.currentUser.name?`<button onclick="deleteMySwap(${s.id})" class="flex-1 py-2 bg-rose-50 text-rose-600 rounded-xl font-bold">내 요청 삭제</button>`:''}</div></div>`).join('');
         }
         async function deleteMySwap(id){
-            const list=dbCache.swaps[dbCache.currentOrgCode]||[],s=list.find(x=>x.id===id);if(!s||s.user!==dbCache.currentUser.name||s.status==='완료')return showAlert('삭제할 수 없는 요청입니다.');if(!confirm('이 대체 근무 요청을 삭제하시겠습니까?'))return;
-            dbCache.swaps[dbCache.currentOrgCode]=list.filter(x=>x.id!==id);await syncSubColToFirestore('swaps',dbCache.currentOrgCode,dbCache.swaps[dbCache.currentOrgCode]);renderSwapList();showAlert('대체 근무 요청이 삭제되었습니다.');
+            const list=dbCache.swaps[dbCache.currentOrgCode]||[];
+            const s=list.find(x=>String(x.id)===String(id));
+
+            if(!s||s.user!==dbCache.currentUser.name||s.status==='완료'){
+                return showAlert('삭제할 수 없는 요청입니다.');
+            }
+            if(!confirm('이 대체 근무 요청을 삭제하시겠습니까?'))return;
+
+            const next=list.filter(x=>String(x.id)!==String(id));
+            const ok=await syncSubColToFirestore('swaps',dbCache.currentOrgCode,next);
+            if(!ok)return;
+
+            dbCache.swaps[dbCache.currentOrgCode]=next;
+
+            // 요청이 사라지면 홈/공지에 올렸던 시스템 대체 근무 공지도 제거
+            await sendCouncilPush(
+                'swap_request_close',
+                '대체 근무 요청 종료',
+                '대체 근무 요청이 종료되었습니다.',
+                null,
+                null,
+                id
+            );
+
+            await refreshAppData(false,true);
+
+            if(currentTab==='duties')renderSwapList();
+            if(currentTab==='announcements')renderNoticeList();
+            updateHomeDashboardData();
+
+            showAlert('대체 근무 요청과 연결된 전체 공지를 삭제했습니다.');
         }
         async function reconcileAttendanceAfterSwap(sw){
             const list=(dbCache.guideAttendance[dbCache.currentOrgCode]||[]);
@@ -2881,6 +2949,16 @@
                 '대체 근무 매칭 완료',
                 `${dbCache.currentUser.name} 님이 대체 근무 요청을 수락했습니다. ${s.date} 일정이 ${my.date} 일정과 교환되었습니다.`,
                 [s.user],
+                null,
+                s.id
+            );
+
+            // 이미 매칭된 요청이 홈 공지에 계속 '모집 중'으로 남지 않도록 제거
+            await sendCouncilPush(
+                'swap_request_close',
+                '대체 근무 요청 종료',
+                '대체 근무 매칭이 완료되었습니다.',
+                null,
                 null,
                 s.id
             );
@@ -3730,7 +3808,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=30',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=31',{scope:'./',updateViaCache:'none'});
         }
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
@@ -3843,7 +3921,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=30',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=31',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
