@@ -602,6 +602,34 @@
 
 
 
+
+        <!-- Activity Dashboard Reset Management -->
+        <div id="activity-dashboard-reset-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-center justify-center p-4">
+            <div class="modal-content bg-white w-full max-w-md rounded-3xl p-5 relative shadow-2xl max-h-[82vh] overflow-y-auto">
+                <button onclick="closeModal('activity-dashboard-reset-modal')" class="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+
+                <h3 class="text-lg font-bold text-slate-800">활동 대시보드 초기화 관리</h3>
+                <p class="text-[11px] text-slate-500 mt-2 leading-relaxed">
+                    기존 출석·회의 기록은 삭제하지 않고, 선택한 시점부터 활동 대시보드 집계만 다시 시작합니다.
+                </p>
+
+                <button onclick="resetAllActivityDashboards()"
+                    class="w-full mt-4 py-3 bg-rose-600 text-white rounded-xl font-bold">
+                    조직 전체 인원 한번에 초기화
+                </button>
+
+                <div class="mt-5">
+                    <div class="flex items-center justify-between mb-2">
+                        <h4 class="text-xs font-bold text-slate-700">개별 초기화</h4>
+                        <span class="text-[10px] text-slate-400">조직원별 선택 가능</span>
+                    </div>
+                    <div id="activity-dashboard-member-list" class="space-y-2"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- Master Admin Code -->
         <div id="master-admin-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-center justify-center p-4">
             <div class="modal-content bg-white w-full max-w-sm rounded-3xl p-5 relative shadow-2xl">
@@ -1582,7 +1610,7 @@
                                     <span id="dash-time" class="text-sm font-bold text-amber-600">0시간</span>
                                 </div>
                             </div>
-                            ${currentUserIsAdmin()?`<button onclick="resetActivityDashboard()" class="w-full py-2 bg-rose-50 text-rose-600 rounded-xl font-bold text-[11px] border border-rose-100">활동 대시보드 초기화</button>`:''}
+                            ${currentUserIsAdmin()?`<button onclick="openActivityDashboardResetModal()" class="w-full py-2 bg-rose-50 text-rose-600 rounded-xl font-bold text-[11px] border border-rose-100">활동 대시보드 초기화 관리</button>`:''}
                         </div>
                     </div>
                 `;
@@ -2892,21 +2920,141 @@
             });return effective;
         }
 
-        async function resetActivityDashboard(){
-            if(!currentUserIsAdmin())return showAlert('관리자만 활동 대시보드를 초기화할 수 있습니다.');
-            if(!confirm('모든 조직원의 활동 대시보드 집계를 0부터 다시 시작할까요?\n기존 출석·회의 기록 자체는 삭제되지 않습니다.'))return;
-            if(!confirm('마지막 확인입니다. 활동 대시보드를 정말 초기화하시겠습니까?'))return;
-            const org=currentOrg();if(!org)return;
-            org.dashboardResetAt=new Date().toISOString();
-            await syncOrgToFirestore(org);
+        function getDashboardResetAtForMember(name){
+            const org=currentOrg();
+            if(!org)return 0;
+
+            const member=(org.members||[]).find(m=>m.name===name);
+            const globalTs=org.dashboardResetAt
+                ? new Date(org.dashboardResetAt).getTime()
+                : 0;
+            const memberTs=member?.dashboardResetAt
+                ? new Date(member.dashboardResetAt).getTime()
+                : 0;
+
+            // 예전 전체 초기화 기록과 새 개별 초기화 기록 중 더 최근 시점 사용
+            return Math.max(globalTs,memberTs);
+        }
+
+        function formatDashboardResetAt(value){
+            if(!value)return '초기화 기록 없음';
+            const d=new Date(value);
+            if(Number.isNaN(d.getTime()))return '초기화 기록 없음';
+            return d.toLocaleString('ko-KR',{
+                year:'numeric',
+                month:'2-digit',
+                day:'2-digit',
+                hour:'2-digit',
+                minute:'2-digit'
+            });
+        }
+
+        function openActivityDashboardResetModal(){
+            if(!currentUserIsAdmin()){
+                return showAlert('관리자만 활동 대시보드를 초기화할 수 있습니다.');
+            }
+
+            const org=currentOrg();
+            const listEl=document.getElementById('activity-dashboard-member-list');
+            if(!org||!listEl)return;
+
+            listEl.innerHTML=(org.members||[]).map(m=>{
+                const resetAt=m.dashboardResetAt||org.dashboardResetAt||null;
+                return `
+                    <div class="bg-slate-50 border border-slate-200 rounded-2xl p-3 flex items-center gap-3">
+                        <div class="flex-1 min-w-0">
+                            <div class="text-sm font-bold text-slate-800">${m.name} <span class="text-indigo-600">(${m.role})</span></div>
+                            <div class="text-[10px] text-slate-400 mt-1">최근 초기화: ${formatDashboardResetAt(resetAt)}</div>
+                        </div>
+                        <button
+                            data-member-name="${encodeURIComponent(m.name)}"
+                            onclick="resetOneActivityDashboard(decodeURIComponent(this.dataset.memberName))"
+                            class="shrink-0 px-3 py-2 bg-white border border-rose-200 text-rose-600 rounded-xl font-bold text-[11px]">
+                            초기화
+                        </button>
+                    </div>
+                `;
+            }).join('')||'<p class="text-center text-xs text-slate-400 py-6">조직원이 없습니다.</p>';
+
+            openModal('activity-dashboard-reset-modal');
+        }
+
+        async function resetOneActivityDashboard(name){
+            if(!currentUserIsAdmin()){
+                return showAlert('관리자만 활동 대시보드를 초기화할 수 있습니다.');
+            }
+
+            const org=currentOrg();
+            if(!org)return;
+
+            const member=(org.members||[]).find(m=>m.name===name);
+            if(!member)return showAlert('해당 조직원을 찾을 수 없습니다.');
+
+            if(!confirm(`${name} 님의 활동 대시보드 집계를 지금부터 0으로 다시 시작할까요?\n기존 출석·회의 기록 자체는 삭제되지 않습니다.`)){
+                return;
+            }
+
+            member.dashboardResetAt=new Date().toISOString();
+
+            const ok=await syncOrgToFirestore(org);
+            if(!ok){
+                return showAlert('개별 활동 대시보드 초기화 저장에 실패했습니다.');
+            }
+
+            // 내가 초기화 대상이면 홈 숫자도 즉시 갱신
+            if(name===dbCache.currentUser?.name){
+                updateHomeDashboardData();
+            }
+
+            openActivityDashboardResetModal();
+            showAlert(`${name} 님의 활동 대시보드를 초기화했습니다.\n기존 기록은 보존됩니다.`);
+        }
+
+        async function resetAllActivityDashboards(){
+            if(!currentUserIsAdmin()){
+                return showAlert('관리자만 활동 대시보드를 초기화할 수 있습니다.');
+            }
+
+            if(!confirm('조직에 있는 모든 사람의 활동 대시보드를 한번에 0부터 다시 시작할까요?\n기존 출석·회의 기록 자체는 삭제되지 않습니다.')){
+                return;
+            }
+
+            if(!confirm('마지막 확인입니다.\n조직 전체 인원의 활동 대시보드를 정말 초기화하시겠습니까?')){
+                return;
+            }
+
+            const org=currentOrg();
+            if(!org)return;
+
+            const now=new Date().toISOString();
+
+            // 새 방식: 각 조직원에게 개별 초기화 시점 저장
+            (org.members||[]).forEach(m=>{
+                m.dashboardResetAt=now;
+            });
+
+            // 예전 버전과의 호환도 유지
+            org.dashboardResetAt=now;
+
+            const ok=await syncOrgToFirestore(org);
+            if(!ok){
+                return showAlert('전체 활동 대시보드 초기화 저장에 실패했습니다.');
+            }
+
             updateHomeDashboardData();
-            showAlert('활동 대시보드를 초기화했습니다. 기존 기록은 보존됩니다.');
+            openActivityDashboardResetModal();
+            showAlert('조직 전체 인원의 활동 대시보드를 초기화했습니다.\n기존 기록은 보존됩니다.');
+        }
+
+        // 예전 코드가 이 함수를 호출하는 경우에도 전체 초기화 관리창을 열도록 호환
+        function resetActivityDashboard(){
+            openActivityDashboardResetModal();
         }
 
         function updateHomeDashboardData(){
             checkAttendanceDeadlines().then(()=>{ renderHomeAttendanceAlerts(); if(currentTab==='duties'&&currentUserIsAdmin()) renderGuideAttendanceReport(); });
             const meets=(dbCache.meetings[dbCache.currentOrgCode]||[]).filter(x=>x.scope!=='department'), att=dbCache.guideAttendance[dbCache.currentOrgCode]||[], notices=(dbCache.notices[dbCache.currentOrgCode]||[]).filter(x=>x.scope!=='department');
-            const resetAt=currentOrg()?.dashboardResetAt?new Date(currentOrg().dashboardResetAt).getTime():0;
+            const resetAt=getDashboardResetAtForMember(dbCache.currentUser.name);
             const myValidAtt=att.filter(a=>!a.deleted&&a.user===dbCache.currentUser.name&&a.status!=='결석'&&(!resetAt||new Date(a.createdAt||`${a.date}T${a.time||'00:00'}`).getTime()>=resetAt));
             const myAtt=myValidAtt.length, myMeets=meets.filter(m=>m.rsvps?.[dbCache.currentUser.name]==='참석'&&(!resetAt||Number(m.id)>=resetAt)).length;
             document.getElementById('dash-crack').innerText=`${myAtt}회`; document.getElementById('dash-meeting').innerText=`${myMeets}회`; document.getElementById('dash-time').innerText=`${myAtt}시간`;
@@ -3266,7 +3414,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=26',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=27',{scope:'./',updateViaCache:'none'});
         }
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
@@ -3379,7 +3527,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=26',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=27',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
