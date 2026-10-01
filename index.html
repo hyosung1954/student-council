@@ -566,7 +566,7 @@
                     <i class="fa-solid fa-xmark"></i>
                 </button>
                 <h3 class="text-lg font-bold text-rose-600 mb-1 pr-8">🛠️ 조직 관리 및 설정</h3>
-                <p class="text-xs text-slate-500 mb-4">조직 대표 이미지, 선도 위반 사유, 역할 및 조직원 추방을 관리합니다.</p>
+                <p class="text-xs text-slate-500 mb-4">조직 대표 이미지, 선도 위반 사유 및 조직원 역할을 관리합니다.</p>
                 
                 <!-- Org Image Upload Section -->
                 <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200 mb-4 space-y-2 text-xs">
@@ -599,6 +599,25 @@
 
         <!-- Department Management -->
         
+
+
+        <!-- Permanent Account Deletion -->
+        <div id="delete-account-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-center justify-center p-4">
+            <div class="modal-content bg-white w-full max-w-sm rounded-3xl p-5 relative shadow-2xl">
+                <h3 class="text-lg font-bold text-rose-600">계정 영구 삭제</h3>
+                <p class="text-sm text-slate-700 mt-3 leading-relaxed">
+                    정말로 삭제하시겠습니까?<br>
+                    <b class="text-rose-600">삭제 시 되돌릴 수 없습니다.</b>
+                </p>
+                <p class="text-[11px] text-slate-500 mt-3 leading-relaxed">
+                    내 계정, 개인정보, 프로필, 조직 가입 정보와 내 계정에 연결된 개인 활동 정보가 삭제됩니다.
+                </p>
+                <div class="grid grid-cols-2 gap-2 mt-5">
+                    <button id="delete-account-no-btn" onclick="closeModal('delete-account-modal')" class="py-3 bg-slate-100 text-slate-700 rounded-xl font-bold">아니오</button>
+                    <button id="delete-account-yes-btn" onclick="confirmDeleteMyAccount()" class="py-3 bg-rose-600 text-white rounded-xl font-bold">예</button>
+                </div>
+            </div>
+        </div>
 
         <!-- All Members Directory / Admin Management -->
         <div id="member-directory-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-end justify-center">
@@ -1208,6 +1227,64 @@
             showMainApp();
         }
 
+        function openDeleteAccountModal(){
+            if(!dbCache.currentUser)return showAlert('로그인 정보를 확인할 수 없습니다.');
+            openModal('delete-account-modal');
+        }
+
+        async function confirmDeleteMyAccount(){
+            const sb=requireSupabase();
+            if(!sb)return;
+
+            const yesBtn=document.getElementById('delete-account-yes-btn');
+            const noBtn=document.getElementById('delete-account-no-btn');
+
+            try{
+                if(yesBtn){
+                    yesBtn.disabled=true;
+                    yesBtn.textContent='삭제 중...';
+                    yesBtn.classList.add('opacity-60');
+                }
+                if(noBtn)noBtn.disabled=true;
+
+                // 사용자 ID/이름을 전달하지 않습니다.
+                // Edge Function이 로그인 토큰에서 현재 사용자 본인을 확인해
+                // 그 계정만 삭제하므로 다른 사람의 계정을 지정할 수 없습니다.
+                const {data,error}=await sb.functions.invoke('delete-self-account',{
+                    body:{confirm:true}
+                });
+
+                if(error)throw error;
+                if(!data?.ok)throw new Error(data?.error||'계정 삭제에 실패했습니다.');
+
+                closeModal('delete-account-modal');
+
+                // 삭제된 계정의 로컬 로그인 흔적도 정리
+                safeStorage.removeItem('sc_current_user');
+                safeStorage.removeItem('sc_current_org');
+                safeStorage.removeItem('sc_saved_login_name');
+                safeStorage.removeItem('sc_keep_login');
+
+                try{ await sb.auth.signOut({scope:'local'}); }catch(e){}
+
+                dbCache.currentUser=null;
+                dbCache.currentOrgCode=null;
+
+                alert('계정과 개인 사용자 정보가 영구 삭제되었습니다.');
+                window.location.reload();
+            }catch(e){
+                console.error('계정 영구 삭제 실패:',e);
+                showAlert('계정 삭제 실패: '+(e?.message||e));
+            }finally{
+                if(yesBtn){
+                    yesBtn.disabled=false;
+                    yesBtn.textContent='예';
+                    yesBtn.classList.remove('opacity-60');
+                }
+                if(noBtn)noBtn.disabled=false;
+            }
+        }
+
         async function logoutToAuth() {
             const sb = window.appState?.supabase;
             if (sb) await sb.auth.signOut();
@@ -1548,8 +1625,8 @@
                         ${isAdmin ? `
                         <div class="bg-indigo-50 p-4 rounded-2xl border border-indigo-100 shadow-sm space-y-2">
                             <h3 class="font-bold text-indigo-700"><i class="fa-solid fa-users mr-1"></i> 학생회 전체 인원</h3>
-                            <p class="text-slate-600">이름(직책), 학년·반·번호, 현재 지도 요일을 확인하고 조직원을 추방할 수 있습니다.</p>
-                            <button onclick="openMemberDirectory()" class="w-full py-2.5 bg-indigo-600 text-white rounded-xl font-bold">전체 인원 보기 / 관리</button>
+                            <p class="text-slate-600">이름(직책), 학년·반·번호와 현재 지도 요일을 확인할 수 있습니다.</p>
+                            <button onclick="openMemberDirectory()" class="w-full py-2.5 bg-indigo-600 text-white rounded-xl font-bold">전체 인원 보기</button>
                         </div>
                         <div class="bg-amber-50 p-4 rounded-2xl border border-amber-100 shadow-sm space-y-2">
                             <h3 class="font-bold text-amber-700">회원 비밀번호 초기화</h3>
@@ -1583,6 +1660,7 @@
                         <div class="space-y-2 pt-2">
                             <button onclick="openWithdrawModal()" class="w-full py-3 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-xl font-bold transition">현재 조직 탈퇴하기</button>
                             <button onclick="logoutToAuth()" class="w-full py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold transition">신원 로그아웃</button>
+                            <button onclick="openDeleteAccountModal()" class="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold transition">계정 영구 삭제</button>
                         </div>
                     </div>
                 `;
@@ -2808,7 +2886,6 @@
                         <option value="단장" ${m.role==='단장'?'selected':''}>단장 (1명)</option>
                         <option value="전교회장" ${m.role==='전교회장'?'selected':''}>전교회장 (1명)</option>
                     </select>
-                    ${m.name!==dbCache.currentUser.name?`<button onclick="expelMember(${JSON.stringify(m.name)})" class="px-2 py-1 bg-rose-100 text-rose-600 rounded-lg font-bold">추방</button>`:''}
                     </div>
                 </div>
             `).join('');
@@ -2891,66 +2968,9 @@
         function openMemberDirectory(){
             if(!currentUserIsAdmin())return showAlert('관리자만 전체 인원 관리 창을 열 수 있습니다.');
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode),el=document.getElementById('member-directory-list');if(!org||!el)return;
-            el.innerHTML=(org.members||[]).map(m=>{const p=memberProfile(m.name),days=memberDutyDays(m.name);return`<div class="bg-slate-50 border rounded-2xl p-3 text-xs"><div class="flex gap-3 items-center"><img src="${p.profile_image||'https://placehold.co/72x72/e0e7ff/4f46e5?text=ME'}" class="w-11 h-11 rounded-full object-cover border"><div class="flex-1 min-w-0"><div class="font-bold text-sm">${m.name} <span class="text-indigo-600">(${m.role})</span></div><div class="text-slate-500 mt-1">${p.grade||'-'} · ${p.class||'-'} · ${p.number||'-'}</div><div class="mt-1"><b>지도 요일</b> ${days.length?days.join(', '):'배정 없음'}</div></div>${m.name!==dbCache.currentUser.name?`<button onclick="expelMember(${JSON.stringify(m.name)})" class="px-2.5 py-2 bg-rose-100 text-rose-600 rounded-xl font-bold">추방</button>`:''}</div></div>`}).join('')||'<p class="text-slate-400 text-center py-8">조직원이 없습니다.</p>';
+            el.innerHTML=(org.members||[]).map(m=>{const p=memberProfile(m.name),days=memberDutyDays(m.name);return`<div class="bg-slate-50 border rounded-2xl p-3 text-xs"><div class="flex gap-3 items-center"><img src="${p.profile_image||'https://placehold.co/72x72/e0e7ff/4f46e5?text=ME'}" class="w-11 h-11 rounded-full object-cover border"><div class="flex-1 min-w-0"><div class="font-bold text-sm">${m.name} <span class="text-indigo-600">(${m.role})</span></div><div class="text-slate-500 mt-1">${p.grade||'-'} · ${p.class||'-'} · ${p.number||'-'}</div><div class="mt-1"><b>지도 요일</b> ${days.length?days.join(', '):'배정 없음'}</div></div></div></div>`}).join('')||'<p class="text-slate-400 text-center py-8">조직원이 없습니다.</p>';
             openModal('member-directory-modal');
         }
-        async function expelMember(name){
-            if(!currentUserIsAdmin()){
-                return showAlert('관리자만 조직원을 추방할 수 있습니다.');
-            }
-            if(name===dbCache.currentUser?.name){
-                return showAlert('본인은 이 기능으로 추방할 수 없습니다.');
-            }
-
-            const first=confirm(
-                `${name} 님을 학생회 조직에서 추방할까요?\n지도 일정과 대기 중인 대체 근무 요청도 함께 정리됩니다.`
-            );
-            if(!first)return;
-
-            const second=confirm(
-                `마지막 확인입니다.\n정말 ${name} 님을 조직에서 추방하시겠습니까?`
-            );
-            if(!second)return;
-
-            const sb=requireSupabase();
-            if(!sb)return;
-
-            try{
-                // 브라우저에서 organizations 전체를 직접 수정하지 않고
-                // DB의 관리자 전용 함수에서 권한 확인 + 추방 + 관련 데이터 정리를 한 번에 처리합니다.
-                const {data,error}=await sb.rpc('expel_member_from_org',{
-                    p_org_code: dbCache.currentOrgCode,
-                    p_member_name: name
-                });
-
-                if(error)throw error;
-                if(!data?.ok){
-                    throw new Error(data?.message||'추방 처리 결과를 확인할 수 없습니다.');
-                }
-
-                // 서버에서 다시 읽어 실제로 제거되었는지 검증
-                const loaded=await loadAllFromSupabase();
-                if(!loaded){
-                    throw new Error('추방 후 최신 조직 정보를 불러오지 못했습니다.');
-                }
-
-                const stillExists=currentOrg()?.members?.some(m=>m.name===name);
-                if(stillExists){
-                    throw new Error('서버 조직원 목록에서 아직 제거되지 않았습니다.');
-                }
-
-                // 열려 있는 관리창을 최신 목록으로 다시 그림
-                if(document.getElementById('member-directory-modal')?.classList.contains('show')){
-                    openMemberDirectory();
-                }
-
-                showAlert(`${name} 님을 조직에서 추방했습니다.`);
-            }catch(e){
-                console.error('조직원 추방 실패:',e);
-                showAlert('추방 처리 실패: '+(e?.message||e));
-            }
-        }
-
         async function syncMyMemberMetadata(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode),m=org?.members?.find(x=>x.name===dbCache.currentUser?.name);if(!m||!dbCache.currentUser)return;
             const vals={grade:dbCache.currentUser.grade||'',class:dbCache.currentUser.class||'',number:dbCache.currentUser.number||''};
@@ -3068,7 +3088,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=21',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=22',{scope:'./',updateViaCache:'none'});
         }
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
@@ -3181,7 +3201,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=21',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=22',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
