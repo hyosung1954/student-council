@@ -448,7 +448,7 @@
                         <p id="meeting-target-hint" class="text-[10px] text-slate-400 mb-2">체크된 회원만 푸시 알림과 참석/불참 응답 권한을 받습니다. 다른 회원도 회의 내용은 볼 수 있습니다.</p>
                         <div id="meeting-target-members" class="max-h-36 overflow-y-auto bg-slate-50 border border-slate-200 rounded-xl p-2 space-y-1"></div>
                     </div>
-                    <button onclick="submitMeeting()" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm transition shadow-sm mt-2">회의 소집 및 알림 발송</button>
+                    <button onclick="submitMeeting(this)" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm transition shadow-sm mt-2">회의 소집 및 알림 발송</button>
                 </div>
             </div>
         </div>
@@ -461,7 +461,14 @@
                 <div class="space-y-3 text-xs">
                     <div><label class="block font-bold mb-1">투표 제목</label><input id="poll-title" class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl" placeholder="예: 체육대회 종목 선택"></div>
                     <div><label class="block font-bold mb-1">설명 (선택)</label><textarea id="poll-details" class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl h-16" placeholder="투표 세부사항"></textarea></div>
-                    <div><label class="block font-bold mb-1">후보/선택지 (한 줄에 하나, 개수 제한 없음)</label><textarea id="poll-options" class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl h-32" placeholder="후보 1\n후보 2\n후보 3"></textarea></div>
+                    <div>
+                        <div class="flex items-center justify-between mb-2">
+                            <label class="font-bold">후보/선택지</label>
+                            <button type="button" onclick="addPollCandidate()" class="text-indigo-600 font-bold">+ 후보 추가</button>
+                        </div>
+                        <div id="poll-candidates" class="space-y-2"></div>
+                        <p class="text-[10px] text-slate-400 mt-1">사진은 선택사항입니다.</p>
+                    </div>
 
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <div>
@@ -482,7 +489,7 @@
 
                     <label class="flex items-center gap-2"><input id="poll-anonymous" type="checkbox" checked> 익명 투표</label>
                     <label class="flex items-center gap-2"><input id="poll-show-results" type="checkbox" checked> 회원에게 득표수/비율/투표율 공개</label>
-                    <button onclick="createPoll()" class="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold">투표 등록 + 공지</button>
+                    <button onclick="createPoll(this)" class="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold">투표 등록 + 공지</button>
                 </div>
             </div>
         </div>
@@ -503,7 +510,7 @@
                         <label class="block font-bold text-slate-700 mb-1">공지 내용</label>
                         <textarea id="notice-content" placeholder="공지 내용을 상세히 입력하세요" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl h-24 resize-none"></textarea>
                     </div>
-                    <button onclick="submitNotice()" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm transition shadow-sm mt-2">공지 등록하기</button>
+                    <button onclick="submitNotice(this)" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm transition shadow-sm mt-2">공지 등록하기</button>
                 </div>
             </div>
         </div>
@@ -3187,6 +3194,117 @@
             showAlert(name?`${name} 님을 차장으로 임명했습니다.`:'차장 지정을 해제했습니다.');
         }
 
+        function lockActionButton(btn,text='처리 중...'){
+            if(!btn)return true;
+            if(btn.dataset.busy==='1'){
+                showAlert('이미 처리 중입니다.');
+                return false;
+            }
+            btn.dataset.busy='1';
+            btn.dataset.originalText=btn.innerText;
+            btn.disabled=true;
+            btn.classList.add('opacity-60');
+            btn.innerText=text;
+            return true;
+        }
+
+        function unlockActionButton(btn){
+            if(!btn)return;
+            btn.dataset.busy='0';
+            btn.disabled=false;
+            btn.classList.remove('opacity-60');
+            btn.innerText=btn.dataset.originalText||btn.innerText;
+        }
+
+        let pollCandidateSeq=0;
+
+        function addPollCandidate(name='',image=''){
+            const wrap=document.getElementById('poll-candidates');
+            if(!wrap)return;
+
+            const id=`poll-candidate-${++pollCandidateSeq}`;
+            const row=document.createElement('div');
+            row.className='bg-slate-50 border border-slate-200 rounded-xl p-2';
+            row.dataset.candidateId=id;
+
+            row.innerHTML=`
+                <div class="flex gap-2 items-center">
+                    <img id="${id}-preview"
+                         src="${image||'https://placehold.co/56x56/e2e8f0/64748b?text=사진'}"
+                         class="w-14 h-14 rounded-xl object-cover border bg-white shrink-0">
+                    <div class="flex-1 min-w-0 space-y-1">
+                        <input id="${id}-name"
+                               value="${String(name).replace(/"/g,'&quot;')}"
+                               placeholder="후보 이름"
+                               class="w-full bg-white border border-slate-200 px-2.5 py-2 rounded-lg">
+                        <input type="file"
+                               accept="image/*"
+                               onchange="setPollCandidateImage('${id}',this)"
+                               class="block w-full text-[10px] text-slate-500">
+                    </div>
+                    <button type="button"
+                            onclick="this.closest('[data-candidate-id]').remove()"
+                            class="text-rose-500 font-bold px-2">삭제</button>
+                </div>
+            `;
+
+            wrap.appendChild(row);
+        }
+
+        async function setPollCandidateImage(id,input){
+            const file=input.files?.[0];
+            if(!file)return;
+
+            const img=new Image();
+            const reader=new FileReader();
+
+            const dataUrl=await new Promise((resolve,reject)=>{
+                reader.onload=()=>resolve(reader.result);
+                reader.onerror=reject;
+                reader.readAsDataURL(file);
+            });
+
+            await new Promise((resolve,reject)=>{
+                img.onload=resolve;
+                img.onerror=reject;
+                img.src=String(dataUrl);
+            });
+
+            const max=320;
+            const scale=Math.min(1,max/Math.max(img.width,img.height));
+            const canvas=document.createElement('canvas');
+            canvas.width=Math.max(1,Math.round(img.width*scale));
+            canvas.height=Math.max(1,Math.round(img.height*scale));
+
+            const ctx=canvas.getContext('2d');
+            ctx.drawImage(img,0,0,canvas.width,canvas.height);
+
+            const compressed=canvas.toDataURL('image/jpeg',0.72);
+            const preview=document.getElementById(`${id}-preview`);
+            if(preview)preview.src=compressed;
+        }
+
+        function collectPollCandidates(){
+            const rows=[...document.querySelectorAll('#poll-candidates [data-candidate-id]')];
+            const options=[];
+            const optionImages=[];
+
+            rows.forEach(row=>{
+                const id=row.dataset.candidateId;
+                const name=document.getElementById(`${id}-name`)?.value?.trim()||'';
+                const image=document.getElementById(`${id}-preview`)?.src||'';
+
+                if(name){
+                    options.push(name);
+                    optionImages.push(
+                        image.includes('placehold.co') ? '' : image
+                    );
+                }
+            });
+
+            return {options,optionImages};
+        }
+
         let editingMeetingId=null;
         function renderMeetingTargetMembers(selected=null,allowedNames=null,lockAll=false){const el=document.getElementById('meeting-target-members'),org=currentOrg();if(!el||!org)return;const allowed=allowedNames?new Set(allowedNames):null,members=(org.members||[]).filter(m=>!allowed||allowed.has(m.name)),set=new Set(selected||members.map(m=>m.name));el.innerHTML=members.map(m=>`<label class="flex items-center gap-2 p-1.5"><input class="meeting-target-check" type="checkbox" value="${m.name}" ${set.has(m.name)?'checked':''} ${lockAll?'disabled':''}>${m.name} <span class="text-slate-400">(${m.role}${m.departmentRole?' · '+m.departmentRole:''})</span></label>`).join('');}
         function toggleAllMeetingTargets(){document.querySelectorAll('.meeting-target-check:not(:disabled)').forEach(x=>x.checked=true)}
@@ -3220,12 +3338,156 @@
                 return false;
             }
         }
-        async function submitMeeting(){const title=document.getElementById('meeting-title').value.trim(),details=document.getElementById('meeting-details').value.trim();let loc=document.getElementById('meeting-loc-select').value;if(loc==='기타')loc=document.getElementById('meeting-custom-loc').value.trim()||'기타 장소';const time=document.getElementById('meeting-time').value,targets=meetingComposerContext?.targets||selectedMeetingTargets();if(!title||!time)return showAlert('제목과 회의 일시를 입력해주세요.');if(!targets.length)return showAlert('소집 회원을 선택해주세요.');const list=(dbCache.meetings[dbCache.currentOrgCode]||=[]),extra=meetingComposerContext?{scope:'department',departmentId:meetingComposerContext.departmentId,departmentName:meetingComposerContext.departmentName,author:dbCache.currentUser.name}:{scope:'global'};if(editingMeetingId){const m=list.find(x=>x.id===editingMeetingId);Object.assign(m,{title,details,loc,time,targets,...extra});await sendCouncilPush('meeting',`회의 수정: ${title}`,`${time.replace('T',' ')} · ${loc}`,targets,meetingComposerContext?.departmentId||null);editingMeetingId=null}else{list.unshift({id:Date.now(),title,details,loc,time,targets,rsvps:{},rsvpReasons:{},...extra});await sendCouncilPush('meeting',`${meetingComposerContext?meetingComposerContext.departmentName+' ':''}회의 소집: ${title}`,`${time.replace('T',' ')} · ${loc}`,targets,meetingComposerContext?.departmentId||null)}await syncSubColToFirestore('meetings',dbCache.currentOrgCode,list);closeModal('meeting-modal');const wasDept=!!meetingComposerContext;meetingComposerContext=null;if(wasDept&&currentTab==='departments')renderDepartmentHub();else if(currentTab==='meetings')renderMeetingList();showAlert('회의가 저장되었습니다.');}
+        async function submitMeeting(btn){
+            const title=document.getElementById('meeting-title').value.trim();
+            const details=document.getElementById('meeting-details').value.trim();
+
+            let loc=document.getElementById('meeting-loc-select').value;
+            if(loc==='기타'){
+                loc=document.getElementById('meeting-custom-loc').value.trim()||'기타 장소';
+            }
+
+            const time=document.getElementById('meeting-time').value;
+            const targets=meetingComposerContext?.targets||selectedMeetingTargets();
+
+            if(!title||!time)return showAlert('제목과 회의 일시를 입력해주세요.');
+            if(!targets.length)return showAlert('소집 회원을 선택해주세요.');
+            if(!lockActionButton(btn,'소집 중...'))return;
+
+            try{
+                const list=(dbCache.meetings[dbCache.currentOrgCode]||=[]);
+                const extra=meetingComposerContext
+                    ? {
+                        scope:'department',
+                        departmentId:meetingComposerContext.departmentId,
+                        departmentName:meetingComposerContext.departmentName,
+                        author:dbCache.currentUser.name
+                      }
+                    : {scope:'global'};
+
+                if(editingMeetingId){
+                    const m=list.find(x=>x.id===editingMeetingId);
+                    Object.assign(m,{title,details,loc,time,targets,...extra});
+
+                    await sendCouncilPush(
+                        'meeting',
+                        `회의 수정: ${title}`,
+                        `${time.replace('T',' ')} · ${loc}`,
+                        targets,
+                        meetingComposerContext?.departmentId||null
+                    );
+
+                    editingMeetingId=null;
+                }else{
+                    list.unshift({
+                        id:Date.now(),
+                        title,
+                        details,
+                        loc,
+                        time,
+                        targets,
+                        rsvps:{},
+                        rsvpReasons:{},
+                        ...extra
+                    });
+
+                    await sendCouncilPush(
+                        'meeting',
+                        `${meetingComposerContext?meetingComposerContext.departmentName+' ':''}회의 소집: ${title}`,
+                        `${time.replace('T',' ')} · ${loc}`,
+                        targets,
+                        meetingComposerContext?.departmentId||null
+                    );
+                }
+
+                const ok=await syncSubColToFirestore(
+                    'meetings',
+                    dbCache.currentOrgCode,
+                    list
+                );
+                if(!ok)throw new Error('회의 저장 실패');
+
+                closeModal('meeting-modal');
+
+                const wasDept=!!meetingComposerContext;
+                meetingComposerContext=null;
+
+                if(wasDept&&currentTab==='departments')renderDepartmentHub();
+                else if(currentTab==='meetings')renderMeetingList();
+
+                showAlert('회의 소집이 완료되었습니다.');
+            }catch(e){
+                console.error(e);
+                showAlert('회의 소집 중 오류가 발생했습니다.');
+            }finally{
+                unlockActionButton(btn);
+            }
+        }
+
         async function deleteMeeting(id){const item=(dbCache.meetings[dbCache.currentOrgCode]||[]).find(x=>x.id===id);if(!item)return;if(item.scope==='department'&&!canManageDepartmentContent(item.departmentId))return showAlert('삭제 권한이 없습니다.');if(item.scope!=='department'&&!currentUserIsAdmin())return showAlert('관리자만 삭제할 수 있습니다.');if(!confirm('이 회의를 삭제하시겠습니까?'))return;dbCache.meetings[dbCache.currentOrgCode]=(dbCache.meetings[dbCache.currentOrgCode]||[]).filter(x=>x.id!==id);await syncSubColToFirestore('meetings',dbCache.currentOrgCode,dbCache.meetings[dbCache.currentOrgCode]);if(currentTab==='departments')renderDepartmentHub();else renderMeetingList();}
         function handleRSVP(mid,status){const list=dbCache.meetings[dbCache.currentOrgCode]||[],m=list.find(x=>x.id===mid);if(!m)return;if(Array.isArray(m.targets)&&!m.targets.includes(dbCache.currentUser.name))return showAlert('소집 대상자가 아닙니다.');m.rsvps||={};m.rsvpReasons||={};if(status==='불참'){const reason=prompt('불참 사유를 입력해주세요.');if(reason===null)return;if(!reason.trim())return showAlert('사유를 입력해주세요.');m.rsvpReasons[dbCache.currentUser.name]=reason.trim()}else delete m.rsvpReasons[dbCache.currentUser.name];m.rsvps[dbCache.currentUser.name]=status;syncSubColToFirestore('meetings',dbCache.currentOrgCode,list);if(currentTab==='departments')renderDepartmentHub();else renderMeetingList();}
         function renderMeetingList(){const el=document.getElementById('meeting-list'),list=(dbCache.meetings[dbCache.currentOrgCode]||[]).filter(x=>x.scope!=='department');if(!el)return;if(!list.length){el.innerHTML='<p class="text-center text-xs text-slate-400 py-8">소집된 회의가 없습니다.</p>';return}el.innerHTML=list.map(m=>{const target=!Array.isArray(m.targets)||m.targets.includes(dbCache.currentUser.name),my=m.rsvps?.[dbCache.currentUser.name],reports=Object.entries(m.rsvps||{}).map(([n,st])=>`<div class="flex justify-between border-t py-1"><span><b>${n}</b> · ${st}</span><span>${st==='불참'?(m.rsvpReasons?.[n]||''):''}</span></div>`).join('');return`<div class="bg-white p-4 rounded-2xl border shadow-sm space-y-2 text-xs"><div class="flex justify-between"><b class="text-sm">${m.title}</b><span>${m.loc}</span></div><p><b>회의 일시</b> ${m.time.replace('T',' ')}</p><div class="bg-indigo-50 text-indigo-700 px-2.5 py-2 rounded-xl font-bold">소집: ${meetingAudienceLabel(m)||'대상 미지정'}</div>${m.details?`<p class="bg-slate-50 p-2 rounded-lg whitespace-pre-line">${m.details}</p>`:''}${target?`<div class="grid grid-cols-2 gap-2"><button onclick="handleRSVP(${m.id},'참석')" class="py-2 rounded-xl font-bold ${my==='참석'?'bg-emerald-600 text-white':'bg-slate-100'}">참석</button><button onclick="handleRSVP(${m.id},'불참')" class="py-2 rounded-xl font-bold ${my==='불참'?'bg-rose-600 text-white':'bg-slate-100'}">불참</button></div>`:`<div class="bg-slate-50 p-2 rounded-lg text-slate-500">열람만 가능 · 참석/불참 응답 대상 아님</div>`}${currentUserIsAdmin()?`<div class="bg-slate-50 p-2 rounded-xl"><b>응답</b>${reports||'<p>아직 응답 없음</p>'}</div><div class="flex gap-2"><button onclick="openMeetingForEdit(${m.id})" class="flex-1 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold">수정</button><button onclick="deleteMeeting(${m.id})" class="flex-1 py-2 bg-rose-50 text-rose-600 rounded-xl font-bold">삭제</button></div>`:''}</div>`}).join('');}
 
-        async function submitNotice(){const title=document.getElementById('notice-title').value.trim(),content=document.getElementById('notice-content').value.trim();if(!title||!content)return showAlert('제목과 내용을 모두 입력해주세요.');const ctx=noticeComposerContext,notice={id:Date.now(),title,content,date:new Date().toLocaleDateString(),author:dbCache.currentUser.name,...(ctx?{scope:'department',departmentId:ctx.departmentId,departmentName:ctx.departmentName}:{scope:'global'})};(dbCache.notices[dbCache.currentOrgCode]||=[]).unshift(notice);await syncSubColToFirestore('notices',dbCache.currentOrgCode,dbCache.notices[dbCache.currentOrgCode]);await sendCouncilPush('notice',`${ctx?ctx.departmentName+' 공지':'전체 공지'}: ${title}`,content,ctx?.targets||null,ctx?.departmentId||null);closeModal('notice-modal');noticeComposerContext=null;if(currentTab==='departments')renderDepartmentHub();else if(currentTab==='announcements')renderNoticeList();showAlert('공지사항이 등록되었습니다.');}
+        async function submitNotice(btn){
+            const title=document.getElementById('notice-title').value.trim();
+            const content=document.getElementById('notice-content').value.trim();
+
+            if(!title||!content){
+                return showAlert('제목과 내용을 모두 입력해주세요.');
+            }
+
+            if(!lockActionButton(btn,'등록 중...'))return;
+
+            try{
+                const ctx=noticeComposerContext;
+                const notice={
+                    id:Date.now(),
+                    title,
+                    content,
+                    date:new Date().toLocaleDateString(),
+                    author:dbCache.currentUser.name,
+                    ...(ctx
+                        ? {
+                            scope:'department',
+                            departmentId:ctx.departmentId,
+                            departmentName:ctx.departmentName
+                          }
+                        : {scope:'global'})
+                };
+
+                const list=(dbCache.notices[dbCache.currentOrgCode]||=[]);
+                list.unshift(notice);
+
+                const ok=await syncSubColToFirestore(
+                    'notices',
+                    dbCache.currentOrgCode,
+                    list
+                );
+                if(!ok)throw new Error('공지 저장 실패');
+
+                await sendCouncilPush(
+                    'notice',
+                    `${ctx?ctx.departmentName+' 공지':'전체 공지'}: ${title}`,
+                    content,
+                    ctx?.targets||null,
+                    ctx?.departmentId||null
+                );
+
+                closeModal('notice-modal');
+                noticeComposerContext=null;
+
+                if(currentTab==='departments')renderDepartmentHub();
+                else if(currentTab==='announcements')renderNoticeList();
+
+                showAlert('공지 등록 및 알림 발송이 완료되었습니다.');
+            }catch(e){
+                console.error(e);
+                showAlert('공지 등록 중 오류가 발생했습니다.');
+            }finally{
+                unlockActionButton(btn);
+            }
+        }
+
         function deleteNotice(id){if(!currentUserIsAdmin())return showAlert('관리자만 공지를 삭제할 수 있습니다.');if(!confirm('이 공지를 삭제하시겠습니까?'))return;dbCache.notices[dbCache.currentOrgCode]=(dbCache.notices[dbCache.currentOrgCode]||[]).filter(n=>n.id!==id);syncSubColToFirestore('notices',dbCache.currentOrgCode,dbCache.notices[dbCache.currentOrgCode]);renderNoticeList();updateHomeDashboardData();showAlert('공지가 삭제되었습니다.');}
         async function openSwapRequestFromNotice(swapId){
             // 최신 대체 근무 상태를 먼저 불러와 이미 매칭된 오래된 공지를 방지
@@ -4083,7 +4345,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=35',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=36',{scope:'./',updateViaCache:'none'});
         }
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
@@ -4196,7 +4458,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=35',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=36',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
@@ -4289,10 +4551,16 @@
                 return showAlert('관리자만 투표를 만들 수 있습니다.');
             }
 
-            ['poll-title','poll-details','poll-options'].forEach(id=>{
+            ['poll-title','poll-details'].forEach(id=>{
                 const el=document.getElementById(id);
                 if(el)el.value='';
             });
+
+            const candidateWrap=document.getElementById('poll-candidates');
+            if(candidateWrap)candidateWrap.innerHTML='';
+            pollCandidateSeq=0;
+            addPollCandidate();
+            addPollCandidate();
 
             const now=new Date();
             const tomorrow=new Date(now.getTime()+24*60*60*1000);
@@ -4309,23 +4577,20 @@
             openModal('poll-modal');
         }
 
-        async function createPoll(){
+        async function createPoll(btn){
             if(!currentUserIsAdmin()){
                 return showAlert('관리자만 투표를 만들 수 있습니다.');
             }
 
             const title=document.getElementById('poll-title').value.trim();
             const details=document.getElementById('poll-details').value.trim();
-            const options=document.getElementById('poll-options').value
-                .split('\n')
-                .map(x=>x.trim())
-                .filter(Boolean);
+            const {options,optionImages}=collectPollCandidates();
 
             const startValue=document.getElementById('poll-start-at')?.value;
             const endValue=document.getElementById('poll-end-at')?.value;
 
             if(!title||options.length<2){
-                return showAlert('투표 제목과 2개 이상의 선택지를 입력해주세요.');
+                return showAlert('투표 제목과 후보를 2개 이상 입력해주세요.');
             }
 
             if(!startValue||!endValue){
@@ -4343,66 +4608,77 @@
                 return showAlert('투표 종료 시간은 시작 시간보다 뒤여야 합니다.');
             }
 
-            const now=Date.now();
+            if(!lockActionButton(btn,'투표 등록 중...'))return;
 
-            const poll={
-                id:Date.now(),
-                title,
-                details,
-                options,
-                anonymous:document.getElementById('poll-anonymous').checked,
-                showResults:document.getElementById('poll-show-results').checked,
-                votes:{},
-                createdAt:new Date().toISOString(),
-                startAt:start.toISOString(),
-                endAt:end.toISOString(),
-                status:start.getTime()>now?'scheduled':'active',
-                endReason:null,
-                endedAt:null,
-                dayBeforeNotifiedAt:null,
-                hourBeforeNotifiedAt:null,
-                endedNotifiedAt:null
-            };
+            try{
+                const now=Date.now();
 
-            (dbCache.polls[dbCache.currentOrgCode]||=[]).unshift(poll);
+                const poll={
+                    id:Date.now(),
+                    title,
+                    details,
+                    options,
+                    optionImages,
+                    anonymous:document.getElementById('poll-anonymous').checked,
+                    showResults:document.getElementById('poll-show-results').checked,
+                    votes:{},
+                    createdAt:new Date().toISOString(),
+                    startAt:start.toISOString(),
+                    endAt:end.toISOString(),
+                    status:start.getTime()>now?'scheduled':'active',
+                    endReason:null,
+                    endedAt:null,
+                    dayBeforeNotifiedAt:null,
+                    hourBeforeNotifiedAt:null,
+                    endedNotifiedAt:null
+                };
 
-            const ok=await syncSubColToFirestore(
-                'polls',
-                dbCache.currentOrgCode,
-                dbCache.polls[dbCache.currentOrgCode]
-            );
-            if(!ok)return;
+                const pollList=(dbCache.polls[dbCache.currentOrgCode]||=[]);
+                pollList.unshift(poll);
 
-            const noticeList=(dbCache.notices[dbCache.currentOrgCode]||=[]);
+                const ok=await syncSubColToFirestore(
+                    'polls',
+                    dbCache.currentOrgCode,
+                    pollList
+                );
+                if(!ok)throw new Error('투표 저장 실패');
 
-            noticeList.unshift({
-                id:Date.now()+1,
-                title:`새 투표: ${title}`,
-                content:`${details?details+'\n':''}투표 기간: ${pollFormatDateTime(poll.startAt)} ~ ${pollFormatDateTime(poll.endAt)}\n공지에서 누르면 바로 투표 화면으로 이동합니다.`,
-                date:new Date().toLocaleDateString(),
-                system:true,
-                scope:'global',
-                source:'poll_open',
-                pollId:poll.id
-            });
+                const noticeList=(dbCache.notices[dbCache.currentOrgCode]||=[]);
 
-            await syncSubColToFirestore(
-                'notices',
-                dbCache.currentOrgCode,
-                noticeList
-            );
+                noticeList.unshift({
+                    id:Date.now()+1,
+                    title:`새 투표: ${title}`,
+                    content:`${details?details+'\n':''}투표 기간: ${pollFormatDateTime(poll.startAt)} ~ ${pollFormatDateTime(poll.endAt)}\n공지에서 누르면 바로 투표 화면으로 이동합니다.`,
+                    date:new Date().toLocaleDateString(),
+                    system:true,
+                    scope:'global',
+                    source:'poll_open',
+                    pollId:poll.id
+                });
 
-            await sendCouncilPush(
-                'poll',
-                `회의 투표: ${title}`,
-                `${details?details+'\n':''}종료: ${pollFormatDateTime(poll.endAt)}`,
-                null
-            );
+                await syncSubColToFirestore(
+                    'notices',
+                    dbCache.currentOrgCode,
+                    noticeList
+                );
 
-            closeModal('poll-modal');
-            renderPollList();
+                await sendCouncilPush(
+                    'poll',
+                    `회의 투표: ${title}`,
+                    `${details?details+'\n':''}종료: ${pollFormatDateTime(poll.endAt)}`,
+                    null
+                );
 
-            showAlert('투표가 등록되었습니다. 종료 1일 전·1시간 전 및 종료 시 자동 알림이 발송됩니다.');
+                closeModal('poll-modal');
+                renderPollList();
+
+                showAlert('투표가 등록되었습니다.');
+            }catch(e){
+                console.error(e);
+                showAlert('투표 등록 중 오류가 발생했습니다.');
+            }finally{
+                unlockActionButton(btn);
+            }
         }
 
         async function castPollVote(pid,index){
@@ -4590,11 +4866,19 @@
                                         class="w-full text-left p-2.5 rounded-xl border
                                             ${Number(my)===i?'border-indigo-600 bg-indigo-50':'border-slate-200'}
                                             ${disabled?'opacity-60 cursor-not-allowed':''}">
-                                        <b>${o}</b>
-                                        ${show
-                                            ? `<div class="text-slate-500 mt-1">${counts[i]}표 · ${pct}%</div>`
-                                            : ''
-                                        }
+                                        <div class="flex items-center gap-3">
+                                            ${p.optionImages?.[i]
+                                                ? `<img src="${p.optionImages[i]}" class="w-12 h-12 rounded-xl object-cover border bg-white shrink-0">`
+                                                : ''
+                                            }
+                                            <div class="min-w-0">
+                                                <b>${o}</b>
+                                                ${show
+                                                    ? `<div class="text-slate-500 mt-1">${counts[i]}표 · ${pct}%</div>`
+                                                    : ''
+                                                }
+                                            </div>
+                                        </div>
                                     </button>
                                 `;
                             }).join('')}
