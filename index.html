@@ -3271,6 +3271,41 @@
             },120);
         }
 
+        async function openPollFromNotice(pollId){
+            try{ await loadAllFromSupabase(); }catch(e){}
+
+            const poll=(dbCache.polls[dbCache.currentOrgCode]||[])
+                .find(p=>String(p.id)===String(pollId));
+
+            if(!poll){
+                showAlert('이 투표는 삭제되었거나 더 이상 존재하지 않습니다.');
+                if(currentTab==='announcements')renderNoticeList();
+                updateHomeDashboardData();
+                return;
+            }
+
+            switchTab('meetings');
+
+            setTimeout(()=>{
+                const card=document.querySelector(`[data-poll-card="${String(pollId)}"]`);
+                if(!card){
+                    showAlert('투표 항목을 찾지 못했습니다.');
+                    return;
+                }
+
+                card.scrollIntoView({
+                    behavior:'smooth',
+                    block:'center'
+                });
+
+                card.classList.add('ring-2','ring-indigo-500','ring-offset-2');
+
+                setTimeout(()=>{
+                    card.classList.remove('ring-2','ring-indigo-500','ring-offset-2');
+                },2200);
+            },120);
+        }
+
         function renderNoticeList(){
             const container=document.getElementById('notice-list');
             if(!container)return;
@@ -3286,14 +3321,33 @@
             const admin=currentUserIsAdmin();
 
             container.innerHTML=list.map(n=>{
-                const isSwap=n.source==='swap_request'&&n.swapId!==undefined&&n.swapId!==null;
+                const isSwap=
+                    n.source==='swap_request' &&
+                    n.swapId!==undefined &&
+                    n.swapId!==null;
+
+                const isPoll=
+                    (n.source==='poll_open'||n.source==='poll_result') &&
+                    n.pollId!==undefined &&
+                    n.pollId!==null;
+
                 const click=isSwap
                     ? `onclick="openSwapRequestFromNotice(${JSON.stringify(n.swapId)})"`
-                    : '';
+                    : isPoll
+                        ? `onclick="openPollFromNotice(${JSON.stringify(n.pollId)})"`
+                        : '';
+
+                const actionLabel=isSwap
+                    ? '선도 일정에서 바로 수락하기 ›'
+                    : isPoll
+                        ? (n.source==='poll_result'
+                            ? '투표 결과 확인하기 ›'
+                            : '투표하러 가기 ›')
+                        : '';
 
                 return `
                     <div ${click}
-                        class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1.5 text-xs ${isSwap?'cursor-pointer hover:border-indigo-300':''}">
+                        class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1.5 text-xs ${(isSwap||isPoll)?'cursor-pointer hover:border-indigo-300':''}">
                         <div class="flex justify-between items-start font-bold text-slate-800">
                             <span class="text-sm">${n.title}</span>
                             <div class="flex items-center gap-2">
@@ -3304,11 +3358,13 @@
                                 }
                             </div>
                         </div>
+
                         <p class="text-slate-600 leading-relaxed whitespace-pre-line">${n.content}</p>
-                        ${isSwap
+
+                        ${(isSwap||isPoll)
                             ? `<div class="pt-2">
                                 <span class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 font-bold text-[11px]">
-                                    선도 일정에서 바로 수락하기 ›
+                                    ${actionLabel}
                                 </span>
                                </div>`
                             : ''
@@ -3619,16 +3675,29 @@
                 np.innerHTML=notices.length
                     ? notices.slice(0,5).map(n=>{
                         const isSwap=n.source==='swap_request'&&n.swapId!==undefined&&n.swapId!==null;
+                        const isPoll=(n.source==='poll_open'||n.source==='poll_result')&&n.pollId!==undefined&&n.pollId!==null;
+
+                        const click=isSwap
+                            ? `onclick="event.stopPropagation();openSwapRequestFromNotice(${JSON.stringify(n.swapId)})"`
+                            : isPoll
+                                ? `onclick="event.stopPropagation();openPollFromNotice(${JSON.stringify(n.pollId)})"`
+                                : '';
+
+                        const label=isSwap
+                            ? '바로 수락하기 ›'
+                            : isPoll
+                                ? (n.source==='poll_result'?'결과 확인 ›':'투표하기 ›')
+                                : '';
+
                         return `
-                            <div
-                                ${isSwap?`onclick="event.stopPropagation();openSwapRequestFromNotice(${JSON.stringify(n.swapId)})"`:''}
-                                class="border-t pt-2 ${isSwap?'cursor-pointer':''}">
+                            <div ${click}
+                                class="border-t pt-2 ${(isSwap||isPoll)?'cursor-pointer':''}">
                                 <b>${n.title}</b>
                                 <p class="text-slate-500 whitespace-pre-line">${n.content}</p>
                                 <div class="flex items-center justify-between gap-2 mt-1">
                                     <span class="text-[10px] text-slate-400">${n.date||''}</span>
-                                    ${isSwap
-                                        ? `<span class="text-[10px] font-bold text-indigo-600">바로 수락하기 ›</span>`
+                                    ${(isSwap||isPoll)
+                                        ? `<span class="text-[10px] font-bold text-indigo-600">${label}</span>`
                                         : ''
                                     }
                                 </div>
@@ -4014,7 +4083,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=34',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=35',{scope:'./',updateViaCache:'none'});
         }
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
@@ -4127,7 +4196,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=34',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=35',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
@@ -4304,9 +4373,23 @@
             );
             if(!ok)return;
 
-            createSystemNotice(
-                `새 투표: ${title}`,
-                `${details?details+'\n':''}투표 기간: ${pollFormatDateTime(poll.startAt)} ~ ${pollFormatDateTime(poll.endAt)}\n회의 소집 메뉴에서 투표에 참여해주세요.`
+            const noticeList=(dbCache.notices[dbCache.currentOrgCode]||=[]);
+
+            noticeList.unshift({
+                id:Date.now()+1,
+                title:`새 투표: ${title}`,
+                content:`${details?details+'\n':''}투표 기간: ${pollFormatDateTime(poll.startAt)} ~ ${pollFormatDateTime(poll.endAt)}\n공지에서 누르면 바로 투표 화면으로 이동합니다.`,
+                date:new Date().toLocaleDateString(),
+                system:true,
+                scope:'global',
+                source:'poll_open',
+                pollId:poll.id
+            });
+
+            await syncSubColToFirestore(
+                'notices',
+                dbCache.currentOrgCode,
+                noticeList
             );
 
             await sendCouncilPush(
@@ -4373,20 +4456,43 @@
                 return showAlert('관리자만 투표를 삭제할 수 있습니다.');
             }
 
-            if(!confirm('이 투표를 삭제하시겠습니까?'))return;
+            if(!confirm('이 투표를 삭제하시겠습니까?\n연결된 공지도 함께 내려갑니다.'))return;
 
-            dbCache.polls[dbCache.currentOrgCode]=
+            const nextPolls=
                 (dbCache.polls[dbCache.currentOrgCode]||[])
                     .filter(p=>String(p.id)!==String(id));
 
-            await syncSubColToFirestore(
+            const nextNotices=
+                (dbCache.notices[dbCache.currentOrgCode]||[])
+                    .filter(n=>!(
+                        (n.source==='poll_open'||n.source==='poll_result') &&
+                        String(n.pollId)===String(id)
+                    ));
+
+            const pollOk=await syncSubColToFirestore(
                 'polls',
                 dbCache.currentOrgCode,
-                dbCache.polls[dbCache.currentOrgCode]
+                nextPolls
             );
+            if(!pollOk)return;
+
+            const noticeOk=await syncSubColToFirestore(
+                'notices',
+                dbCache.currentOrgCode,
+                nextNotices
+            );
+            if(!noticeOk){
+                return showAlert('투표는 삭제되었지만 연결 공지 삭제에 실패했습니다.');
+            }
+
+            dbCache.polls[dbCache.currentOrgCode]=nextPolls;
+            dbCache.notices[dbCache.currentOrgCode]=nextNotices;
 
             renderPollList();
-            showAlert('투표가 삭제되었습니다.');
+            if(currentTab==='announcements')renderNoticeList();
+            updateHomeDashboardData();
+
+            showAlert('투표와 연결된 공지를 함께 삭제했습니다.');
         }
 
         function renderPollList(){
@@ -4441,7 +4547,7 @@
                             : 'bg-emerald-50 text-emerald-700';
 
                 return `
-                    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3 text-xs">
+                    <div data-poll-card="${String(p.id)}" class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3 text-xs transition">
                         <div class="flex justify-between gap-2">
                             <div class="min-w-0">
                                 <b class="text-sm">${p.title}</b>
