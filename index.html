@@ -462,6 +462,24 @@
                     <div><label class="block font-bold mb-1">투표 제목</label><input id="poll-title" class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl" placeholder="예: 체육대회 종목 선택"></div>
                     <div><label class="block font-bold mb-1">설명 (선택)</label><textarea id="poll-details" class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl h-16" placeholder="투표 세부사항"></textarea></div>
                     <div><label class="block font-bold mb-1">후보/선택지 (한 줄에 하나, 개수 제한 없음)</label><textarea id="poll-options" class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl h-32" placeholder="후보 1\n후보 2\n후보 3"></textarea></div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                            <label class="block font-bold mb-1">투표 시작</label>
+                            <input id="poll-start-at" type="datetime-local"
+                                class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl">
+                        </div>
+                        <div>
+                            <label class="block font-bold mb-1">투표 종료</label>
+                            <input id="poll-end-at" type="datetime-local"
+                                class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl">
+                        </div>
+                    </div>
+
+                    <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-3 text-[10px] leading-relaxed text-indigo-700">
+                        종료 1일 전 · 1시간 전에 자동 알림이 발송됩니다. 종료 시간이 지나거나 조직 전체 인원이 투표하면 자동 종료됩니다.
+                    </div>
+
                     <label class="flex items-center gap-2"><input id="poll-anonymous" type="checkbox" checked> 익명 투표</label>
                     <label class="flex items-center gap-2"><input id="poll-show-results" type="checkbox" checked> 회원에게 득표수/비율/투표율 공개</label>
                     <button onclick="createPoll()" class="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold">투표 등록 + 공지</button>
@@ -3996,7 +4014,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=33',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=34',{scope:'./',updateViaCache:'none'});
         }
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
@@ -4109,7 +4127,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=33',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=34',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
@@ -4136,44 +4154,373 @@
             showAlert(`${targetName} 님의 비밀번호가 123456으로 초기화되었습니다.`);
         }
 
+        function pollDateTimeLocalValue(date){
+            const d=new Date(date);
+            const local=new Date(d.getTime()-d.getTimezoneOffset()*60000);
+            return local.toISOString().slice(0,16);
+        }
+
+        function pollFormatDateTime(value){
+            if(!value)return '-';
+            const d=new Date(value);
+            if(Number.isNaN(d.getTime()))return '-';
+            return d.toLocaleString('ko-KR',{
+                year:'numeric',
+                month:'2-digit',
+                day:'2-digit',
+                hour:'2-digit',
+                minute:'2-digit'
+            });
+        }
+
+        function pollMemberNames(){
+            return (currentOrg()?.members||[])
+                .map(m=>String(m.name||'').trim())
+                .filter(Boolean);
+        }
+
+        function pollVoteCountForCurrentMembers(poll){
+            const names=new Set(pollMemberNames());
+            const votes=poll?.votes||{};
+            return Object.keys(votes).filter(name=>names.has(name)).length;
+        }
+
+        function pollDerivedStatus(poll){
+            const now=Date.now();
+            const start=Date.parse(poll.startAt||poll.createdAt||'');
+            const end=Date.parse(poll.endAt||'');
+
+            if(poll.status==='ended')return 'ended';
+            if(Number.isFinite(end)&&now>=end)return 'ended';
+            if(Number.isFinite(start)&&now<start)return 'scheduled';
+
+            const members=pollMemberNames();
+            const voted=pollVoteCountForCurrentMembers(poll);
+
+            if(members.length>0&&voted>=members.length){
+                return 'ended';
+            }
+
+            return 'active';
+        }
+
+        function pollStatusLabel(poll){
+            const status=pollDerivedStatus(poll);
+            if(status==='scheduled')return '시작 예정';
+            if(status==='ended'){
+                if(poll.endReason==='all_voted')return '전원 투표 완료 · 종료';
+                if(poll.endReason==='deadline')return '기간 종료';
+                return '종료';
+            }
+            return '진행 중';
+        }
+
         function openPollModal(){
-            if(!currentUserIsAdmin()) return showAlert('관리자만 투표를 만들 수 있습니다.');
-            ['poll-title','poll-details','poll-options'].forEach(id=>document.getElementById(id).value='');
-            document.getElementById('poll-anonymous').checked=true; document.getElementById('poll-show-results').checked=true; openModal('poll-modal');
+            if(!currentUserIsAdmin()){
+                return showAlert('관리자만 투표를 만들 수 있습니다.');
+            }
+
+            ['poll-title','poll-details','poll-options'].forEach(id=>{
+                const el=document.getElementById(id);
+                if(el)el.value='';
+            });
+
+            const now=new Date();
+            const tomorrow=new Date(now.getTime()+24*60*60*1000);
+
+            const startEl=document.getElementById('poll-start-at');
+            const endEl=document.getElementById('poll-end-at');
+
+            if(startEl)startEl.value=pollDateTimeLocalValue(now);
+            if(endEl)endEl.value=pollDateTimeLocalValue(tomorrow);
+
+            document.getElementById('poll-anonymous').checked=true;
+            document.getElementById('poll-show-results').checked=true;
+
+            openModal('poll-modal');
         }
+
         async function createPoll(){
-            if(!currentUserIsAdmin()) return showAlert('관리자만 투표를 만들 수 있습니다.');
-            const title=document.getElementById('poll-title').value.trim(), details=document.getElementById('poll-details').value.trim();
-            const options=document.getElementById('poll-options').value.split('\n').map(x=>x.trim()).filter(Boolean);
-            if(!title || options.length<2) return showAlert('투표 제목과 2개 이상의 선택지를 입력해주세요.');
-            const poll={id:Date.now(),title,details,options,anonymous:document.getElementById('poll-anonymous').checked,showResults:document.getElementById('poll-show-results').checked,votes:{},createdAt:new Date().toISOString()};
-            (dbCache.polls[dbCache.currentOrgCode] ||= []).unshift(poll);
-            await syncSubColToFirestore('polls',dbCache.currentOrgCode,dbCache.polls[dbCache.currentOrgCode]);
-            createSystemNotice(`새 투표: ${title}`,`${details?details+'\
-':''}회의 소집 메뉴에서 투표에 참여해주세요.`);
-            await sendCouncilPush('poll',`회의 투표: ${title}`,details||'회의 소집 메뉴에서 투표에 참여해주세요.',null);
-            closeModal('poll-modal'); renderPollList(); showAlert('투표가 등록되고 푸시 알림을 발송했습니다.');
+            if(!currentUserIsAdmin()){
+                return showAlert('관리자만 투표를 만들 수 있습니다.');
+            }
+
+            const title=document.getElementById('poll-title').value.trim();
+            const details=document.getElementById('poll-details').value.trim();
+            const options=document.getElementById('poll-options').value
+                .split('\n')
+                .map(x=>x.trim())
+                .filter(Boolean);
+
+            const startValue=document.getElementById('poll-start-at')?.value;
+            const endValue=document.getElementById('poll-end-at')?.value;
+
+            if(!title||options.length<2){
+                return showAlert('투표 제목과 2개 이상의 선택지를 입력해주세요.');
+            }
+
+            if(!startValue||!endValue){
+                return showAlert('투표 시작 시간과 종료 시간을 모두 입력해주세요.');
+            }
+
+            const start=new Date(startValue);
+            const end=new Date(endValue);
+
+            if(
+                Number.isNaN(start.getTime())||
+                Number.isNaN(end.getTime())||
+                end.getTime()<=start.getTime()
+            ){
+                return showAlert('투표 종료 시간은 시작 시간보다 뒤여야 합니다.');
+            }
+
+            const now=Date.now();
+
+            const poll={
+                id:Date.now(),
+                title,
+                details,
+                options,
+                anonymous:document.getElementById('poll-anonymous').checked,
+                showResults:document.getElementById('poll-show-results').checked,
+                votes:{},
+                createdAt:new Date().toISOString(),
+                startAt:start.toISOString(),
+                endAt:end.toISOString(),
+                status:start.getTime()>now?'scheduled':'active',
+                endReason:null,
+                endedAt:null,
+                dayBeforeNotifiedAt:null,
+                hourBeforeNotifiedAt:null,
+                endedNotifiedAt:null
+            };
+
+            (dbCache.polls[dbCache.currentOrgCode]||=[]).unshift(poll);
+
+            const ok=await syncSubColToFirestore(
+                'polls',
+                dbCache.currentOrgCode,
+                dbCache.polls[dbCache.currentOrgCode]
+            );
+            if(!ok)return;
+
+            createSystemNotice(
+                `새 투표: ${title}`,
+                `${details?details+'\n':''}투표 기간: ${pollFormatDateTime(poll.startAt)} ~ ${pollFormatDateTime(poll.endAt)}\n회의 소집 메뉴에서 투표에 참여해주세요.`
+            );
+
+            await sendCouncilPush(
+                'poll',
+                `회의 투표: ${title}`,
+                `${details?details+'\n':''}종료: ${pollFormatDateTime(poll.endAt)}`,
+                null
+            );
+
+            closeModal('poll-modal');
+            renderPollList();
+
+            showAlert('투표가 등록되었습니다. 종료 1일 전·1시간 전 및 종료 시 자동 알림이 발송됩니다.');
         }
-        function castPollVote(pid,index){
-            const list=dbCache.polls[dbCache.currentOrgCode]||[], p=list.find(x=>x.id===pid); if(!p)return;
-            p.votes ||= {}; p.votes[dbCache.currentUser.name]=Number(index);
-            syncSubColToFirestore('polls',dbCache.currentOrgCode,list); renderPollList(); showAlert('투표가 저장되었습니다. 다시 선택하면 표가 변경됩니다.');
+
+        async function castPollVote(pid,index){
+            const list=dbCache.polls[dbCache.currentOrgCode]||[];
+            const p=list.find(x=>String(x.id)===String(pid));
+
+            if(!p)return;
+
+            const status=pollDerivedStatus(p);
+
+            if(status==='scheduled'){
+                return showAlert(`아직 투표 시작 전입니다.\n시작: ${pollFormatDateTime(p.startAt)}`);
+            }
+
+            if(status==='ended'){
+                return showAlert('이미 종료된 투표입니다.');
+            }
+
+            p.votes||={};
+            p.votes[dbCache.currentUser.name]=Number(index);
+
+            const members=pollMemberNames();
+            const total=pollVoteCountForCurrentMembers(p);
+
+            if(members.length>0&&total>=members.length){
+                p.status='ended';
+                p.endReason='all_voted';
+                p.endedAt=new Date().toISOString();
+            }else{
+                p.status='active';
+            }
+
+            const ok=await syncSubColToFirestore(
+                'polls',
+                dbCache.currentOrgCode,
+                list
+            );
+            if(!ok)return;
+
+            renderPollList();
+
+            if(p.status==='ended'){
+                showAlert('투표가 저장되었습니다. 조직 전체 인원이 투표하여 자동 종료되었습니다.');
+            }else{
+                showAlert('투표가 저장되었습니다. 다시 선택하면 표가 변경됩니다.');
+            }
         }
-        function deletePoll(id){
-            if(!currentUserIsAdmin()) return showAlert('관리자만 투표를 삭제할 수 있습니다.');
+
+        async function deletePoll(id){
+            if(!currentUserIsAdmin()){
+                return showAlert('관리자만 투표를 삭제할 수 있습니다.');
+            }
+
             if(!confirm('이 투표를 삭제하시겠습니까?'))return;
-            dbCache.polls[dbCache.currentOrgCode]=(dbCache.polls[dbCache.currentOrgCode]||[]).filter(p=>p.id!==id);
-            syncSubColToFirestore('polls',dbCache.currentOrgCode,dbCache.polls[dbCache.currentOrgCode]); renderPollList(); showAlert('투표가 삭제되었습니다.');
+
+            dbCache.polls[dbCache.currentOrgCode]=
+                (dbCache.polls[dbCache.currentOrgCode]||[])
+                    .filter(p=>String(p.id)!==String(id));
+
+            await syncSubColToFirestore(
+                'polls',
+                dbCache.currentOrgCode,
+                dbCache.polls[dbCache.currentOrgCode]
+            );
+
+            renderPollList();
+            showAlert('투표가 삭제되었습니다.');
         }
+
         function renderPollList(){
-            const c=document.getElementById('poll-list'); if(!c)return; const list=(dbCache.polls[dbCache.currentOrgCode]||[]).filter(x=>x.scope!=='department'); const admin=currentUserIsAdmin();
-            if(!list.length){c.innerHTML='<p class="text-center text-xs text-slate-400 py-5">등록된 투표가 없습니다.</p>';return;}
-            const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode), memberCount=org?.members?.length||0;
-            c.innerHTML=list.map(p=>{ p.votes ||= {}; const total=Object.keys(p.votes).length, my=p.votes[dbCache.currentUser.name]; const counts=p.options.map((_,i)=>Object.values(p.votes).filter(v=>Number(v)===i).length);
-                const show=p.showResults||admin; const voterDetails=admin&&!p.anonymous?Object.entries(p.votes).map(([n,v])=>`<div>${n} → ${p.options[Number(v)]||'-'}</div>`).join(''):'';
-                return `<div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2 text-xs"><div class="flex justify-between gap-2"><div><b class="text-sm">${p.title}</b><div class="text-slate-400 mt-1">${p.anonymous?'익명 투표':'기명 투표'}${p.showResults?' · 결과 공개':' · 결과 비공개'}</div></div>${admin?`<button onclick="deletePoll(${p.id})" class="text-rose-600 font-bold">삭제</button>`:''}</div>${p.details?`<p class="bg-slate-50 p-2 rounded-lg whitespace-pre-line">${p.details}</p>`:''}<div class="space-y-2">${p.options.map((o,i)=>{const pct=total?Math.round(counts[i]/total*100):0;return `<button onclick="castPollVote(${p.id},${i})" class="w-full text-left p-2.5 rounded-xl border ${Number(my)===i?'border-indigo-600 bg-indigo-50':'border-slate-200'}"><b>${o}</b>${show?`<div class="text-slate-500 mt-1">${counts[i]}표 · ${pct}%</div>`:''}</button>`}).join('')}</div>${show?`<div class="text-slate-500">투표율: ${memberCount?Math.round(total/memberCount*100):0}% (${total}/${memberCount}명)</div>`:'<div class="text-slate-400">관리자 설정에 따라 결과는 공개되지 않습니다.</div>'}${voterDetails?`<div class="bg-slate-50 p-2 rounded-xl"><b>기명 투표 상세</b>${voterDetails}</div>`:''}</div>`;
+            const c=document.getElementById('poll-list');
+            if(!c)return;
+
+            const list=(dbCache.polls[dbCache.currentOrgCode]||[])
+                .filter(x=>x.scope!=='department');
+
+            const admin=currentUserIsAdmin();
+
+            if(!list.length){
+                c.innerHTML='<p class="text-center text-xs text-slate-400 py-5">등록된 투표가 없습니다.</p>';
+                return;
+            }
+
+            const memberNames=pollMemberNames();
+            const memberCount=memberNames.length;
+            const memberSet=new Set(memberNames);
+
+            c.innerHTML=list.map(p=>{
+                p.votes||={};
+
+                const status=pollDerivedStatus(p);
+                const ended=status==='ended';
+                const scheduled=status==='scheduled';
+
+                const validVoteEntries=Object.entries(p.votes)
+                    .filter(([name])=>memberSet.has(name));
+
+                const total=validVoteEntries.length;
+                const my=p.votes[dbCache.currentUser.name];
+
+                const counts=p.options.map((_,i)=>
+                    validVoteEntries.filter(([,v])=>Number(v)===i).length
+                );
+
+                const show=p.showResults||admin;
+
+                const voterDetails=
+                    admin&&!p.anonymous
+                        ? validVoteEntries
+                            .map(([n,v])=>`<div>${n} → ${p.options[Number(v)]||'-'}</div>`)
+                            .join('')
+                        : '';
+
+                const statusClass=
+                    ended
+                        ? 'bg-slate-100 text-slate-600'
+                        : scheduled
+                            ? 'bg-amber-50 text-amber-700'
+                            : 'bg-emerald-50 text-emerald-700';
+
+                return `
+                    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3 text-xs">
+                        <div class="flex justify-between gap-2">
+                            <div class="min-w-0">
+                                <b class="text-sm">${p.title}</b>
+                                <div class="text-slate-400 mt-1">
+                                    ${p.anonymous?'익명 투표':'기명 투표'}
+                                    ${p.showResults?' · 결과 공개':' · 결과 비공개'}
+                                </div>
+                            </div>
+
+                            <div class="flex items-start gap-2 shrink-0">
+                                <span class="px-2 py-1 rounded-lg font-bold text-[10px] ${statusClass}">
+                                    ${pollStatusLabel(p)}
+                                </span>
+                                ${admin
+                                    ? `<button onclick="deletePoll(${p.id})" class="text-rose-600 font-bold">삭제</button>`
+                                    : ''
+                                }
+                            </div>
+                        </div>
+
+                        <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-2.5 text-[10px] text-indigo-700 leading-relaxed">
+                            <b>투표 기간</b><br>
+                            ${pollFormatDateTime(p.startAt||p.createdAt)} ~ ${pollFormatDateTime(p.endAt)}
+                        </div>
+
+                        ${p.details
+                            ? `<p class="bg-slate-50 p-2 rounded-lg whitespace-pre-line">${p.details}</p>`
+                            : ''
+                        }
+
+                        <div class="space-y-2">
+                            ${p.options.map((o,i)=>{
+                                const pct=total?Math.round(counts[i]/total*100):0;
+                                const disabled=ended||scheduled;
+
+                                return `
+                                    <button
+                                        ${disabled?'disabled':''}
+                                        onclick="castPollVote(${p.id},${i})"
+                                        class="w-full text-left p-2.5 rounded-xl border
+                                            ${Number(my)===i?'border-indigo-600 bg-indigo-50':'border-slate-200'}
+                                            ${disabled?'opacity-60 cursor-not-allowed':''}">
+                                        <b>${o}</b>
+                                        ${show
+                                            ? `<div class="text-slate-500 mt-1">${counts[i]}표 · ${pct}%</div>`
+                                            : ''
+                                        }
+                                    </button>
+                                `;
+                            }).join('')}
+                        </div>
+
+                        ${show
+                            ? `<div class="text-slate-500">
+                                투표율: ${memberCount?Math.round(total/memberCount*100):0}% (${total}/${memberCount}명)
+                               </div>`
+                            : '<div class="text-slate-400">관리자 설정에 따라 결과는 공개되지 않습니다.</div>'
+                        }
+
+                        ${ended
+                            ? `<div class="bg-slate-50 rounded-xl p-2.5 font-bold text-slate-600">
+                                이 투표는 종료되었습니다.
+                               </div>`
+                            : scheduled
+                                ? `<div class="bg-amber-50 rounded-xl p-2.5 font-bold text-amber-700">
+                                    ${pollFormatDateTime(p.startAt)}부터 투표할 수 있습니다.
+                                   </div>`
+                                : ''
+                        }
+
+                        ${voterDetails
+                            ? `<div class="bg-slate-50 p-2 rounded-xl"><b>기명 투표 상세</b>${voterDetails}</div>`
+                            : ''
+                        }
+                    </div>
+                `;
             }).join('');
         }
+
     </script>
 </body>
 </html>
