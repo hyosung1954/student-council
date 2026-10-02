@@ -2776,13 +2776,38 @@
             if(changed) await syncSubColToFirestore('guide_attendance',dbCache.currentOrgCode,list);
         }
         function attendanceStatusLabel(a){return a.status||'출석';}
+        function attendanceIsAfterDashboardReset(a){
+            const resetAt=getDashboardResetAtForMember(a.user);
+            if(!resetAt)return true;
+
+            const attendanceTime=new Date(
+                a.createdAt ||
+                `${a.date}T${a.time||'00:00'}`
+            ).getTime();
+
+            return Number.isFinite(attendanceTime) && attendanceTime>=resetAt;
+        }
+
         function openAttendancePerson(name){
-            const rows=(dbCache.guideAttendance[dbCache.currentOrgCode]||[]).filter(a=>a.user===name&&!a.deleted).sort((a,b)=>String(b.date).localeCompare(String(a.date))||String(b.time||'').localeCompare(String(a.time||'')));
+            const rows=(dbCache.guideAttendance[dbCache.currentOrgCode]||[])
+                .filter(a=>
+                    a.user===name &&
+                    !a.deleted &&
+                    attendanceIsAfterDashboardReset(a)
+                )
+                .sort((a,b)=>String(b.date).localeCompare(String(a.date))||String(b.time||'').localeCompare(String(a.time||'')));
             document.getElementById('attendance-person-title').innerText=`${name} · 지도 출석 보고`;
             document.getElementById('attendance-person-list').innerHTML=rows.length?rows.map(a=>{const st=attendanceStatusLabel(a),cls=st==='결석'?'text-rose-600':st==='지각'?'text-amber-600':'text-emerald-600';return `<div class="bg-slate-50 border rounded-xl p-3"><div class="flex justify-between gap-2"><span><b>${a.date}</b> · ${a.type}${a.time?' · '+a.time:''} · <b class="${cls}">${st}</b></span>${currentUserIsAdmin()?`<button onclick="runBusyAction(this,'기록 삭제 중...',()=>deleteGuideAttendance(${JSON.stringify(a.id)}).then(()=>openAttendancePerson(${JSON.stringify(name)})))" class="text-rose-600 font-bold">삭제</button>`:''}</div></div>`}).join(''):'<p class="text-slate-400">기록이 없습니다.</p>';openModal('attendance-person-modal');
         }
         function renderGuideAttendanceReport(){
-            const el=document.getElementById('guide-attendance-report');if(!el)return;const rows=(dbCache.guideAttendance[dbCache.currentOrgCode]||[]).filter(a=>!a.deleted);
+            const el=document.getElementById('guide-attendance-report');
+            if(!el)return;
+
+            const rows=(dbCache.guideAttendance[dbCache.currentOrgCode]||[])
+                .filter(a=>
+                    !a.deleted &&
+                    attendanceIsAfterDashboardReset(a)
+                );
             const names=[...new Set(rows.map(a=>a.user))].sort((a,b)=>a.localeCompare(b,'ko'));
             el.innerHTML=names.length?names.map(name=>{const mine=rows.filter(a=>a.user===name),p=mine.filter(a=>attendanceStatusLabel(a)==='출석').length,l=mine.filter(a=>attendanceStatusLabel(a)==='지각').length,ab=mine.filter(a=>attendanceStatusLabel(a)==='결석').length;return `<button onclick="openAttendancePerson(${JSON.stringify(name)})" class="w-full bg-white border border-slate-200 rounded-xl p-3 text-xs text-left flex justify-between items-center"><b>${name}</b><span class="text-slate-500">출석 ${p} · 지각 ${l} · 결석 ${ab} ›</span></button>`}).join(''):'<p class="text-xs text-slate-400">아직 지도 출석 기록이 없습니다.</p>';
         }
@@ -3880,7 +3905,7 @@
             const member=(org.members||[]).find(m=>m.name===name);
             if(!member)return showAlert('해당 조직원을 찾을 수 없습니다.');
 
-            if(!confirm(`${name} 님의 활동 대시보드 집계를 지금부터 0으로 다시 시작할까요?\n기존 출석·회의 기록 자체는 삭제되지 않습니다.`)){
+            if(!confirm(`${name} 님의 활동 대시보드와 지도 출석 보고를 지금부터 0으로 다시 시작할까요?\n기존 원본 출석·회의 기록은 삭제되지 않고, 초기화 이전 기록만 집계/보고에서 숨겨집니다.`)){
                 return;
             }
 
@@ -3891,13 +3916,17 @@
                 return showAlert('개별 활동 대시보드 초기화 저장에 실패했습니다.');
             }
 
-            // 내가 초기화 대상이면 홈 숫자도 즉시 갱신
+            // 홈 활동 대시보드 + 선도 일정의 지도 출석 보고를 즉시 갱신
             if(name===dbCache.currentUser?.name){
                 updateHomeDashboardData();
             }
 
+            if(currentUserIsAdmin()){
+                renderGuideAttendanceReport();
+            }
+
             openActivityDashboardResetModal();
-            showAlert(`${name} 님의 활동 대시보드를 초기화했습니다.\n기존 기록은 보존됩니다.`);
+            showAlert(`${name} 님의 활동 대시보드와 지도 출석 보고를 초기화했습니다.\n기존 원본 기록은 보존됩니다.`);
         }
 
         async function resetAllActivityDashboards(){
@@ -3905,11 +3934,11 @@
                 return showAlert('관리자만 활동 대시보드를 초기화할 수 있습니다.');
             }
 
-            if(!confirm('조직에 있는 모든 사람의 활동 대시보드를 한번에 0부터 다시 시작할까요?\n기존 출석·회의 기록 자체는 삭제되지 않습니다.')){
+            if(!confirm('조직에 있는 모든 사람의 활동 대시보드와 지도 출석 보고를 한번에 0부터 다시 시작할까요?\n기존 원본 출석·회의 기록은 삭제되지 않고, 초기화 이전 기록만 집계/보고에서 숨겨집니다.')){
                 return;
             }
 
-            if(!confirm('마지막 확인입니다.\n조직 전체 인원의 활동 대시보드를 정말 초기화하시겠습니까?')){
+            if(!confirm('마지막 확인입니다.\n조직 전체 인원의 활동 대시보드와 지도 출석 보고를 정말 초기화하시겠습니까?')){
                 return;
             }
 
@@ -3932,8 +3961,9 @@
             }
 
             updateHomeDashboardData();
+            renderGuideAttendanceReport();
             openActivityDashboardResetModal();
-            showAlert('조직 전체 인원의 활동 대시보드를 초기화했습니다.\n기존 기록은 보존됩니다.');
+            showAlert('조직 전체 인원의 활동 대시보드와 지도 출석 보고를 초기화했습니다.\n기존 원본 기록은 보존됩니다.');
         }
 
         // 예전 코드가 이 함수를 호출하는 경우에도 전체 초기화 관리창을 열도록 호환
@@ -4384,7 +4414,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=37',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=38',{scope:'./',updateViaCache:'none'});
         }
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
@@ -4497,7 +4527,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=37',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=38',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
