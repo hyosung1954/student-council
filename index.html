@@ -49,6 +49,35 @@
         .switch input:checked+.switch-slider{background:#4f46e5}.switch input:checked+.switch-slider:before{transform:translateX(20px)}
         #nav-bar{position:fixed!important;left:50%!important;right:auto!important;bottom:0!important;transform:translateX(-50%)!important;width:100%!important;max-width:28rem!important;padding-bottom:max(.5rem,env(safe-area-inset-bottom))!important;z-index:9990!important}
         #main-content{padding-bottom:calc(7rem + env(safe-area-inset-bottom))!important;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;touch-action:pan-y}
+        /* v41: Samsung Internet / Android Chrome scrolling fix.
+           Outer app must have a bounded height; the inner flex scroll area needs min-height:0.
+           Otherwise overflow-hidden on #app may clip settings instead of making them scrollable. */
+        html { height: 100%; }
+        body { min-height: 100vh; min-height: 100dvh; overflow-x: hidden; }
+        #app {
+            height: 100vh !important; /* fallback for older Android WebView */
+            height: 100dvh !important;
+            max-height: 920px !important;
+            min-height: 0 !important; /* overrides min-h-screen/sm:min-h-[880px] */
+        }
+        #main-app {
+            flex: 1 1 0% !important;
+            height: auto !important;
+            min-height: 0 !important;
+            overflow: hidden !important;
+        }
+        #main-app > header { flex-shrink: 0; }
+        #main-content {
+            flex: 1 1 0% !important;
+            min-height: 0 !important;
+            height: auto !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior-y: auto !important;
+            touch-action: pan-y !important;
+        }
+        #auth-screen, #org-screen { min-height: 0; -webkit-overflow-scrolling: touch; }
         #pull-refresh-indicator{position:fixed;top:50%;left:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;transform:translate(-50%,-50%) scale(.72);z-index:9980;background:rgba(255,255,255,.96);border:1px solid #e2e8f0;border-radius:999px;color:#4f46e5;box-shadow:0 5px 16px rgba(15,23,42,.18);opacity:0;transition:transform .12s ease,opacity .12s ease,background .12s ease,color .12s ease;pointer-events:none}
         #pull-refresh-indicator.show{transform:translate(-50%,-50%) scale(1);opacity:1}
         #pull-refresh-indicator.ready{background:#4f46e5;color:#fff}
@@ -2545,54 +2574,107 @@
                 .filter(x=>x.bases.length)
                 .sort((a,b)=>a.next.localeCompare(b.next));
 
-            el.innerHTML=groups.map((g,idx)=>{
-                const cards=g.bases
-                    .slice()
-                    .sort((a,b)=>String(a.time).localeCompare(String(b.time)))
-                    .map(x=>{
-                        const originalName=canonicalMemberName(x.memberName);
-                        const nextDate=nextDateForDutyBase(x);
-                        const actualName=effectiveMemberForDutyBase(x,nextDate);
-                        const swapped=actualName && actualName!==originalName;
+            const renderDutyCard=(x)=>{
+                const originalName=canonicalMemberName(x.memberName);
+                const nextDate=nextDateForDutyBase(x);
+                const actualName=effectiveMemberForDutyBase(x,nextDate);
+                const swapped=actualName && actualName!==originalName;
 
-                        return `
-                            <div class="bg-slate-50 border rounded-xl p-3">
-                                <div class="flex justify-between gap-2">
-                                    <button onclick="openDutyMemberSchedule(${JSON.stringify(actualName||originalName)})" class="text-left flex-1">
-                                        <div class="flex items-center gap-2 flex-wrap">
-                                            <b>${actualName||originalName}</b>
-                                            ${swapped
-                                                ? `<span class="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[9px] font-bold">대체 근무 반영</span>`
-                                                : ''
-                                            }
-                                        </div>
-                                        <div class="text-[10px] text-slate-500 mt-1">
-                                            ${nextDate} · ${x.dutyType} · ${x.time}
-                                            ${x.endDate?` · ~ ${x.endDate}`:''}
-                                        </div>
-                                        ${swapped
-                                            ? `<div class="text-[10px] text-indigo-600 mt-1">기본 배정: ${originalName} → 실제 근무: ${actualName}</div>`
-                                            : ''
-                                        }
-                                    </button>
-
-                                    ${currentUserIsAdmin()
-                                        ? `<div class="flex gap-1 self-center">
-                                            <button onclick="openDutyEditModal(${JSON.stringify(x.id)})" class="px-2 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg font-bold text-[10px]">수정</button>
-                                            <button
-                                                data-duty-id="${x.id}"
-                                                data-duty-date="${nextDate}"
-                                                data-actual-name="${encodeURIComponent(actualName||originalName)}"
-                                                onclick="runBusyAction(this,'삭제 중...',()=>deleteDutySchedule(this.dataset.dutyId,this.dataset.dutyDate,decodeURIComponent(this.dataset.actualName)))"
-                                                class="px-2 py-1.5 bg-rose-50 text-rose-600 rounded-lg font-bold text-[10px]">
-                                                삭제
-                                            </button>
-                                           </div>`
+                return `
+                    <div class="bg-slate-50 border rounded-xl p-3">
+                        <div class="flex justify-between gap-2">
+                            <button onclick="openDutyMemberSchedule(${JSON.stringify(actualName||originalName)})" class="text-left flex-1">
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <b>${actualName||originalName}</b>
+                                    ${swapped
+                                        ? `<span class="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[9px] font-bold">대체 근무 반영</span>`
                                         : ''
                                     }
                                 </div>
-                            </div>`;
-                    }).join('');
+                                <div class="text-[10px] text-slate-500 mt-1">
+                                    ${nextDate} · ${x.dutyType} · ${x.time}
+                                    ${x.endDate?` · ~ ${x.endDate}`:''}
+                                </div>
+                                ${swapped
+                                    ? `<div class="text-[10px] text-indigo-600 mt-1">기본 배정: ${originalName} → 실제 근무: ${actualName}</div>`
+                                    : ''
+                                }
+                            </button>
+
+                            ${currentUserIsAdmin()
+                                ? `<div class="flex gap-1 self-center">
+                                    <button onclick="openDutyEditModal(${JSON.stringify(x.id)})" class="px-2 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg font-bold text-[10px]">수정</button>
+                                    <button
+                                        data-duty-id="${x.id}"
+                                        data-duty-date="${nextDate}"
+                                        data-actual-name="${encodeURIComponent(actualName||originalName)}"
+                                        onclick="runBusyAction(this,'삭제 중...',()=>deleteDutySchedule(this.dataset.dutyId,this.dataset.dutyDate,decodeURIComponent(this.dataset.actualName)))"
+                                        class="px-2 py-1.5 bg-rose-50 text-rose-600 rounded-lg font-bold text-[10px]">
+                                        삭제
+                                    </button>
+                                   </div>`
+                                : ''
+                            }
+                        </div>
+                    </div>`;
+            };
+
+            el.innerHTML=groups.map((g,idx)=>{
+                const morning=g.bases
+                    .filter(x=>String(x.dutyType||'').includes('아침'))
+                    .slice()
+                    .sort((a,b)=>String(a.time).localeCompare(String(b.time)));
+
+                const lunch=g.bases
+                    .filter(x=>String(x.dutyType||'').includes('점심'))
+                    .slice()
+                    .sort((a,b)=>String(a.time).localeCompare(String(b.time)));
+
+                const other=g.bases
+                    .filter(x=>{
+                        const type=String(x.dutyType||'');
+                        return !type.includes('아침')&&!type.includes('점심');
+                    })
+                    .slice()
+                    .sort((a,b)=>String(a.time).localeCompare(String(b.time)));
+
+                const sections=[];
+
+                if(morning.length){
+                    sections.push(`
+                        <div class="space-y-2">
+                            <div class="flex items-center justify-between px-1">
+                                <h4 class="font-bold text-indigo-700">아침지도</h4>
+                                <span class="text-[10px] text-slate-400">${morning.length}명</span>
+                            </div>
+                            ${morning.map(renderDutyCard).join('')}
+                        </div>
+                    `);
+                }
+
+                if(lunch.length){
+                    sections.push(`
+                        <div class="space-y-2 ${morning.length?'pt-3 mt-3 border-t':''}">
+                            <div class="flex items-center justify-between px-1">
+                                <h4 class="font-bold text-amber-700">점심지도</h4>
+                                <span class="text-[10px] text-slate-400">${lunch.length}명</span>
+                            </div>
+                            ${lunch.map(renderDutyCard).join('')}
+                        </div>
+                    `);
+                }
+
+                if(other.length){
+                    sections.push(`
+                        <div class="space-y-2 ${(morning.length||lunch.length)?'pt-3 mt-3 border-t':''}">
+                            <div class="flex items-center justify-between px-1">
+                                <h4 class="font-bold text-slate-600">기타 지도</h4>
+                                <span class="text-[10px] text-slate-400">${other.length}명</span>
+                            </div>
+                            ${other.map(renderDutyCard).join('')}
+                        </div>
+                    `);
+                }
 
                 return `
                     <details class="bg-white rounded-2xl border shadow-sm overflow-hidden" ${idx===0?'open':''}>
@@ -2600,7 +2682,9 @@
                             <b>${g.day}</b>
                             <span class="text-[11px] text-indigo-600">다음 지도 ${g.next}</span>
                         </summary>
-                        <div class="border-t p-3 space-y-2">${cards}</div>
+                        <div class="border-t p-3">
+                            ${sections.join('')}
+                        </div>
                     </details>`;
             }).join('');
         }
@@ -4476,13 +4560,35 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=39',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=42',{scope:'./',updateViaCache:'none'});
         }
+        // 삼성 인터넷/안드로이드 크롬: 사용자가 버튼을 누른 즉시 권한을 요청해야
+        // 비동기 로그인/서비스워커 작업 때문에 사용자 제스처가 소실되는 문제를 줄일 수 있습니다.
+        async function requestPushPermissionOnTap(){
+            if(!('Notification' in window)){
+                throw new Error('이 브라우저에서는 알림을 사용할 수 없습니다. 삼성 인터넷을 업데이트하거나 Chrome 앱에서 시도해주세요.');
+            }
+            if(Notification.permission==='denied'){
+                throw new Error('알림이 차단되어 있습니다. 휴대폰 설정 > 애플리케이션 > Samsung Internet > 알림과 브라우저의 사이트 알림 권한을 허용해주세요.');
+            }
+            if(Notification.permission==='default'){
+                // requestPermission은 어떤 await보다 먼저 호출되어야 합니다.
+                const permission=await Notification.requestPermission();
+                if(permission!=='granted'){
+                    throw new Error('알림 권한을 허용해야 알림을 받을 수 있습니다.');
+                }
+            }
+            return true;
+        }
+
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
             const {data:{user},error:userError}=await sb.auth.getUser();
             if(userError||!user) throw new Error('로그인 정보를 확인할 수 없습니다.');
             const reg=await getPushRegistration();
+            if(!reg.pushManager){
+                throw new Error('현재 브라우저 또는 바로가기에서는 푸시 구독을 사용할 수 없습니다. Chrome에서 학생회 웹앱을 앱으로 설치해 시도해주세요.');
+            }
             let sub=await reg.pushManager.getSubscription();
 
             const anyEnabled=!!enabled||!!noticeEnabled||!!meetingEnabled||!!pollEnabled;
@@ -4570,13 +4676,20 @@
         async function savePushSettings(){
             const en=document.getElementById('guide-reminder-enabled'),tm=document.getElementById('guide-reminder-time'),ne=document.getElementById('notice-push-enabled'),me=document.getElementById('meeting-push-enabled'),pe=document.getElementById('poll-push-enabled');
             const s={enabled:!!en?.checked,time:tm?.value||'20:00',noticeEnabled:!!ne?.checked,meetingEnabled:!!me?.checked,pollEnabled:!!pe?.checked};
-            try{await syncPushSubscription(s.enabled,s.time,s.noticeEnabled,s.meetingEnabled,s.pollEnabled);safeStorage.setItem(reminderStorageKey(),JSON.stringify(s));showAlert('푸시 알림 설정을 저장했습니다.');}
-            catch(e){showAlert('푸시 알림 설정 실패: '+(e?.message||e));}
+            try{
+                if(s.enabled||s.noticeEnabled||s.meetingEnabled||s.pollEnabled){
+                    await requestPushPermissionOnTap();
+                }
+                await syncPushSubscription(s.enabled,s.time,s.noticeEnabled,s.meetingEnabled,s.pollEnabled);
+                safeStorage.setItem(reminderStorageKey(),JSON.stringify(s));
+                showAlert('푸시 알림 설정을 저장했습니다.');
+            }catch(e){showAlert('푸시 알림 설정 실패: '+(e?.message||e));}
         }
         async function saveGuideReminderSettings(){return savePushSettings();}
 
         async function requestGuideNotificationPermission(showMessage=true){
             try{
+                await requestPushPermissionOnTap();
                 const time=document.getElementById('guide-reminder-time')?.value||getGuideReminderSettings().time||'20:00';
                 const en=document.getElementById('guide-reminder-enabled'),ne=document.getElementById('notice-push-enabled'),me=document.getElementById('meeting-push-enabled'),pe=document.getElementById('poll-push-enabled');
                 let guideEnabled=!!en?.checked,noticeEnabled=ne?ne.checked:true,meetingEnabled=me?me.checked:true,pollEnabled=pe?pe.checked:true;
@@ -4589,7 +4702,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=39',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=42',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
