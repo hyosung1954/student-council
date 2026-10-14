@@ -1722,13 +1722,43 @@
                 renderPollList();
             } else if (tab === 'manual') {
                 const manual = getManualContent();
-                const requests = dbCache.manualRequests[dbCache.currentOrgCode] || [];
+
+                // 선도 기록 변경 요청과 섞이지 않도록 실제 매뉴얼 수정 요청만 표시
+                const requests = (dbCache.manualRequests[dbCache.currentOrgCode] || [])
+                    .filter(r => r.kind !== 'discipline_change' && r.content);
+
                 container.innerHTML = `
                     <div class="space-y-4 text-xs">
                         <div class="flex justify-between items-center"><div><button onclick="switchTab('discipline')" class="text-[11px] text-indigo-600 font-bold mb-1">‹ 선도</button><h2 class="text-base font-bold text-slate-800">선도 업무 매뉴얼</h2></div>
                         <button onclick="openManualModal(${isAdmin})" class="px-3 py-2 ${isAdmin?'bg-indigo-600 text-white':'bg-slate-100 text-indigo-600'} rounded-xl font-bold">${isAdmin?'매뉴얼 수정':'수정사항 요청'}</button></div>
                         <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm"><p class="text-slate-600 leading-relaxed whitespace-pre-line">${manual}</p></div>
-                        ${isAdmin ? `<div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm"><h3 class="font-bold mb-2">접수된 수정 요청</h3>${requests.length?requests.map(r=>`<div class="border-t py-2"><b>${r.user}</b> <span class="text-slate-400">${r.date}</span><p class="whitespace-pre-line mt-1">${r.content}</p></div>`).join(''):'<p class="text-slate-400">요청 없음</p>'}</div>`:''}
+
+                        ${isAdmin ? `
+                            <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                                <h3 class="font-bold mb-2">접수된 수정 요청</h3>
+
+                                ${requests.length
+                                    ? requests.map(r=>`
+                                        <div class="border-t py-3 flex items-start gap-3">
+                                            <div class="flex-1 min-w-0">
+                                                <div>
+                                                    <b>${r.user}</b>
+                                                    <span class="text-slate-400 ml-1">${r.date}</span>
+                                                </div>
+                                                <p class="whitespace-pre-line mt-1 text-slate-600">${r.content}</p>
+                                            </div>
+
+                                            <button
+                                                onclick="runBusyAction(this,'삭제 중...',()=>deleteManualRequest(${JSON.stringify(r.id)}))"
+                                                class="shrink-0 px-2.5 py-1.5 bg-rose-50 text-rose-600 rounded-lg font-bold text-[10px]">
+                                                삭제
+                                            </button>
+                                        </div>
+                                    `).join('')
+                                    : '<p class="text-slate-400">요청 없음</p>'
+                                }
+                            </div>
+                        ` : ''}
                     </div>`;
             } else if (tab === 'announcements') {
                 container.innerHTML = `
@@ -4108,6 +4138,38 @@
         function openManualModal(isAdmin){document.getElementById('manual-modal-title').innerText=isAdmin?'매뉴얼 수정':'매뉴얼 수정사항 요청';document.getElementById('manual-submit-btn').innerText=isAdmin?'매뉴얼 저장':'수정 요청 보내기';document.getElementById('manual-submit-btn').onclick=isAdmin?saveManual:submitManualRequest;document.getElementById('manual-edit-content').value=isAdmin?getManualContent():'';openModal('manual-modal');}
         function saveManual(){const content=document.getElementById('manual-edit-content').value.trim();if(!content)return showAlert('매뉴얼 내용을 입력해주세요.');dbCache.manuals[dbCache.currentOrgCode]=[{content,updatedAt:new Date().toISOString(),editor:dbCache.currentUser.name}];syncSubColToFirestore('manual',dbCache.currentOrgCode,dbCache.manuals[dbCache.currentOrgCode]);closeModal('manual-modal');switchTab('manual');showAlert('매뉴얼이 수정되었습니다.');}
         function submitManualRequest(){const content=document.getElementById('manual-edit-content').value.trim();if(!content)return showAlert('요청 세부사항을 입력해주세요.');const list=(dbCache.manualRequests[dbCache.currentOrgCode]||=[]);list.unshift({id:Date.now(),user:dbCache.currentUser.name,content,date:new Date().toLocaleString()});syncSubColToFirestore('manual_requests',dbCache.currentOrgCode,list);closeModal('manual-modal');showAlert('관리자에게 수정 요청을 보냈습니다.');}
+        async function deleteManualRequest(id){
+            if(!currentUserIsAdmin()){
+                return showAlert('관리자만 매뉴얼 수정 요청을 삭제할 수 있습니다.');
+            }
+
+            const list=dbCache.manualRequests[dbCache.currentOrgCode]||[];
+            const target=list.find(r=>String(r.id)===String(id));
+
+            if(!target || target.kind==='discipline_change'){
+                return showAlert('삭제할 매뉴얼 수정 요청을 찾지 못했습니다.');
+            }
+
+            if(!confirm(`${target.user} 님의 매뉴얼 수정 요청을 삭제하시겠습니까?`)){
+                return;
+            }
+
+            const next=list.filter(r=>String(r.id)!==String(id));
+
+            const ok=await syncSubColToFirestore(
+                'manual_requests',
+                dbCache.currentOrgCode,
+                next
+            );
+
+            if(!ok){
+                return showAlert('수정 요청 삭제에 실패했습니다.');
+            }
+
+            dbCache.manualRequests[dbCache.currentOrgCode]=next;
+            switchTab('manual');
+            showAlert('매뉴얼 수정 요청을 삭제했습니다.');
+        }
         function createSystemNotice(title,content){const list=(dbCache.notices[dbCache.currentOrgCode]||=[]);list.unshift({id:Date.now(),title,content,date:new Date().toLocaleDateString(),system:true});syncSubColToFirestore('notices',dbCache.currentOrgCode,list);}
 
         function openAdminModal() {
@@ -4414,7 +4476,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=38',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=39',{scope:'./',updateViaCache:'none'});
         }
         async function syncPushSubscription(enabled,time,noticeEnabled=true,meetingEnabled=true,pollEnabled=true){
             const sb=requireSupabase(); if(!sb) return false;
@@ -4527,7 +4589,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=38',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=39',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
