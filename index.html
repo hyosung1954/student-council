@@ -102,7 +102,7 @@
         }
 
     </style>
-    <link rel="manifest" href="./manifest.webmanifest?v=52">
+    <link rel="manifest" href="./manifest.webmanifest?v=53">
     <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
     <link rel="apple-touch-icon" href="./icon-192.png">
     <meta name="theme-color" content="#4f46e5">
@@ -2424,7 +2424,7 @@
             document.getElementById('target-name').value = '';
             document.getElementById('target-memo').value = '';
             
-            const todayStr = new Date().toISOString().slice(0, 10);
+            const todayStr = localDateStr();
             document.getElementById('target-date').value = todayStr;
             document.getElementById('target-session-type').selectedIndex = 0;
             document.getElementById('target-grade').selectedIndex = 0;
@@ -2461,7 +2461,7 @@
 
         async function saveDisciplineRecord() {
             const editId = document.getElementById('edit-record-id').value;
-            const recordDate = document.getElementById('target-date').value || new Date().toISOString().slice(0, 10);
+            const recordDate = document.getElementById('target-date').value || localDateStr();
             const sessionType = document.getElementById('target-session-type').value;
             const grade = document.getElementById('target-grade').value;
             const cls = document.getElementById('target-class-sel').value;
@@ -2531,7 +2531,7 @@
             document.getElementById('edit-record-id').value = '';
             document.getElementById('target-name').value = '';
             document.getElementById('target-memo').value = '';
-            document.getElementById('target-date').value = new Date().toISOString().slice(0, 10);
+            document.getElementById('target-date').value = localDateStr();
             document.getElementById('target-session-type').selectedIndex = 0;
             document.getElementById('target-grade').selectedIndex = 0;
             document.getElementById('target-class-sel').selectedIndex = 0;
@@ -2911,7 +2911,7 @@
 
             document.getElementById('discipline-modal-title').innerText = '선도 단속 기록 수정';
             document.getElementById('edit-record-id').value = r.id;
-            document.getElementById('target-date').value = r.date || new Date().toISOString().slice(0, 10);
+            document.getElementById('target-date').value = r.date || localDateStr();
             document.getElementById('target-session-type').value = r.sessionType || '아침지도';
             document.getElementById('target-grade').value = r.grade || '1학년';
             document.getElementById('target-class-sel').value = r.classVal || '1반';
@@ -5321,7 +5321,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=52',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=53',{scope:'./',updateViaCache:'none'});
         }
         // 삼성 인터넷/안드로이드 크롬: 사용자가 버튼을 누른 즉시 권한을 요청해야
         // 비동기 로그인/서비스워커 작업 때문에 사용자 제스처가 소실되는 문제를 줄일 수 있습니다.
@@ -5476,7 +5476,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=52',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=53',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
