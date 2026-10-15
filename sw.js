@@ -1,7 +1,7 @@
 
-/* Student Council PWA offline shell v49. No Supabase API data is cached here. */
-const STATIC_CACHE = 'student-council-shell-v49';
-const CDN_CACHE = 'student-council-vendor-v49';
+/* Student Council PWA offline shell v50. No Supabase API data is cached here. */
+const STATIC_CACHE = 'student-council-shell-v50';
+const CDN_CACHE = 'student-council-vendor-v50';
 const SHELL = ['./index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 const VENDORS = [
   'https://cdn.tailwindcss.com',
@@ -76,4 +76,3 @@ self.addEventListener('notificationclick', event => {
     return clients.openWindow ? clients.openWindow(target) : undefined;
   }));
 });
-
