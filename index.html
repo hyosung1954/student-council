@@ -11,7 +11,6 @@
     <meta name="theme-color" content="#4f46e5">
 
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -103,7 +102,7 @@
         }
 
     </style>
-    <link rel="manifest" href="./manifest.webmanifest?v=44">
+    <link rel="manifest" href="./manifest.webmanifest?v=48">
     <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
     <link rel="apple-touch-icon" href="./icon-192.png">
     <meta name="theme-color" content="#4f46e5">
@@ -285,6 +284,10 @@
                 </div>
             </header>
 
+            <div id="offline-sync-status" role="status" aria-live="polite" class="hidden px-3 py-2 bg-amber-50 border-b border-amber-200 text-amber-900 text-[11px] font-semibold flex-shrink-0">
+                <span id="offline-sync-label">오프라인 상태</span>
+                <button type="button" onclick="retryOfflineDisciplineSync()" class="float-right underline ml-2 font-bold">동기화</button>
+            </div>
             <div id="pull-refresh-indicator" aria-label="새로고침"><i class="fa-solid fa-rotate"></i></div>
             <!-- Main Tab View Container -->
             <main id="main-content" class="flex-1 overflow-y-auto pb-24 p-4 no-scrollbar">
@@ -889,6 +892,239 @@
             polls: {}
         };
 
+        // v48: Save bandwidth by default. Use a tiny change-stamp request instead of
+        // downloading the entire organization dataset every five seconds.
+        const councilDataSaverKey='student-council-data-saver-v48';
+        let councilDataSaver = safeStorage.getItem(councilDataSaverKey) !== '0';
+        let councilLastStamp = null;
+        let councilStampOrg = null;
+        let councilLastFullRefreshAt = 0;
+        let councilLastProbeAt = 0;
+        let councilProbeRunning = false;
+        let offlineRetryAt = 0;
+        let offlineRetryDelay = 15000;
+        function setCouncilDataSaver(checked) {
+            councilDataSaver = !!checked;
+            safeStorage.setItem(councilDataSaverKey, councilDataSaver ? '1' : '0');
+            updateCouncilRealtimeMode();
+            showAlert(councilDataSaver
+                ? '데이터 절약 모드: 변경 확인은 소량의 데이터로 수행합니다.'
+                : '실시간 모드: 변경 사항을 더 자주 확인합니다.');
+        }
+        async function checkCouncilServerChanges(force=false) {
+            if (!navigator.onLine || !dbCache.currentUser || !dbCache.currentOrgCode ||
+                document.hidden || councilProbeRunning || refreshInFlight) return false;
+            const now=Date.now();
+            if(councilStampOrg!==dbCache.currentOrgCode){councilStampOrg=dbCache.currentOrgCode;councilLastStamp=null;}
+            const interval=councilDataSaver ? 60000 : 20000;
+            if (!force && now-councilLastProbeAt<interval) return false;
+            councilLastProbeAt=now;
+            councilProbeRunning=true;
+            try {
+                const sb=window.appState?.supabase;
+                if (!sb) return false;
+                const {data,error}=await sb.rpc('get_council_sync_stamp',{p_org_code:dbCache.currentOrgCode});
+                if (error) throw error;
+                // Member and organization edits don't update org_data: refresh them occasionally.
+                if (councilLastStamp===null || councilLastStamp!==data || now-councilLastFullRefreshAt>900000) {
+                    const ok=await refreshAppData(false,true);
+                    if (ok) councilLastStamp=data;
+                    return ok;
+                }
+                return true;
+            } catch(e) {
+                console.warn('절약 모드 변경 확인 실패:',e);
+                return false;
+            } finally {
+                councilProbeRunning=false;
+            }
+        }
+        // v47: IndexedDB offline-first discipline append. Never queue full-array overwrites.
+        const offlineDBName = 'student-council-offline-v47';
+        let offlineDBPromise = null;
+        let offlineSyncRunning = false;
+        let offlinePendingCount = 0;
+        let offlineLastError = '';
+        let offlineSnapshotLoaded = false;
+        function offlineDB() {
+            if (!('indexedDB' in window)) return Promise.reject(new Error('이 기기는 오프라인 저장을 지원하지 않습니다.'));
+            if (!offlineDBPromise) offlineDBPromise = new Promise((resolve,reject)=>{
+                const req=indexedDB.open(offlineDBName,1);
+                req.onupgradeneeded=()=>{
+                    const db=req.result;
+                    if(!db.objectStoreNames.contains('queue')) db.createObjectStore('queue',{keyPath:'key'});
+                    if(!db.objectStoreNames.contains('snapshots')) db.createObjectStore('snapshots',{keyPath:'key'});
+                };
+                req.onsuccess=()=>resolve(req.result);
+                req.onerror=()=>reject(req.error||new Error('기기 저장소를 열 수 없습니다.'));
+            }).catch(e=>{offlineDBPromise=null;throw e;});
+            return offlineDBPromise;
+        }
+        async function offlineStoreGetAll(store) {
+            const db=await offlineDB();
+            return new Promise((resolve,reject)=>{
+                const tx=db.transaction(store,'readonly');
+                const req=tx.objectStore(store).getAll();
+                req.onsuccess=()=>resolve(req.result||[]);
+                req.onerror=()=>reject(req.error);
+            });
+        }
+        async function offlineStorePut(store,item) {
+            const db=await offlineDB();
+            return new Promise((resolve,reject)=>{
+                const tx=db.transaction(store,'readwrite');
+                tx.objectStore(store).put(item);
+                tx.oncomplete=()=>resolve(true);
+                tx.onerror=()=>reject(tx.error||new Error('기기 저장에 실패했습니다.'));
+                tx.onabort=()=>reject(tx.error||new Error('기기 저장이 취소됐습니다.'));
+            });
+        }
+        async function offlineStoreDelete(store,key) {
+            const db=await offlineDB();
+            return new Promise((resolve,reject)=>{
+                const tx=db.transaction(store,'readwrite');
+                tx.objectStore(store).delete(key);
+                tx.oncomplete=()=>resolve(true);
+                tx.onerror=()=>reject(tx.error);
+            });
+        }
+        function offlineIdentity(){
+            const u=dbCache.currentUser;
+            return u?.id&&dbCache.currentOrgCode ? `${u.id}|${dbCache.currentOrgCode}` : null;
+        }
+        async function offlineMyQueue() {
+            const identity=offlineIdentity();
+            if(!identity)return [];
+            return (await offlineStoreGetAll('queue')).filter(x=>x.identity===identity).sort((a,b)=>a.createdAt-b.createdAt);
+        }
+        function offlineAddPendingToView(queue){
+            const code=dbCache.currentOrgCode;
+            if(!code)return;
+            const list=(dbCache.disciplines[code]||=[]);
+            const ids=new Set(list.map(r=>String(r.id)));
+            for(const entry of queue){
+                if(!ids.has(String(entry.record.id))){list.unshift(entry.record);ids.add(String(entry.record.id));}
+            }
+        }
+        async function offlineUpdateStatus(){
+            try { offlinePendingCount=(await offlineMyQueue()).length; } catch(e){console.warn('오프라인 대기 목록 확인 실패:',e);}
+            const banner=document.getElementById('offline-sync-status');
+            const label=document.getElementById('offline-sync-label');
+            if(!banner||!label)return;
+            const offline=!navigator.onLine;
+            const visible=offline||offlinePendingCount>0||!!offlineLastError;
+            banner.classList.toggle('hidden',!visible);
+            if(offline) label.textContent=`인터넷 없음 · 단속 기록 추가만 가능 · ${offlinePendingCount}건 전송 대기`;
+            else if(offlineSyncRunning) label.textContent=`중앙 서버로 전송 중 · ${offlinePendingCount}건 남음`;
+            else if(offlineLastError) label.textContent=`미전송 ${offlinePendingCount}건 · ${offlineLastError} · 재시도 예정`;
+            else label.textContent=`서버 전송 대기 ${offlinePendingCount}건 · 자동 재전송 예정`;
+        }
+        async function offlineSaveSnapshot(){
+            const identity=offlineIdentity();
+            if(!identity)return;
+            const code=dbCache.currentOrgCode;
+            const org=dbCache.orgs.find(x=>x.code===code);
+            if(!org)return;
+            const types=['disciplines','swaps','meetings','notices','duties','guideAttendance','manuals','manualRequests','polls'];
+            const payload={org,users:dbCache.users,collections:{}};
+            for(const type of types)payload.collections[type]=dbCache[type]?.[code]||[];
+            try{await offlineStorePut('snapshots',{key:identity,payload,savedAt:Date.now()});}
+            catch(e){console.warn('오프라인 조회용 데이터 저장 실패:',e);}
+        }
+        async function offlineRestoreSnapshot(){
+            const identity=offlineIdentity();
+            if(!identity)return false;
+            const snaps=await offlineStoreGetAll('snapshots');
+            const snapshot=snaps.find(x=>x.key===identity);
+            if(!snapshot)return false;
+            const code=dbCache.currentOrgCode;
+            dbCache.orgs=[snapshot.payload.org];
+            dbCache.users=snapshot.payload.users||[];
+            for(const [type,items] of Object.entries(snapshot.payload.collections||{})){
+                if(dbCache[type])dbCache[type][code]=items||[];
+            }
+            offlineSnapshotLoaded=true;
+            offlineAddPendingToView(await offlineMyQueue());
+            await offlineUpdateStatus();
+            return true;
+        }
+        async function offlineOverlayPending(){
+            try{offlineAddPendingToView(await offlineMyQueue());await offlineUpdateStatus();}
+            catch(e){console.warn('미전송 기록 표시 실패:',e);}
+        }
+        async function queueDisciplineRecord(record){
+            const identity=offlineIdentity();
+            if(!identity)throw new Error('로그인 후 소속 조직에서 기록해주세요.');
+            const entry={key:`${identity}|${record.id}`,identity,orgCode:dbCache.currentOrgCode,record,createdAt:Date.now()};
+            await offlineStorePut('queue',entry);
+            const list=(dbCache.disciplines[dbCache.currentOrgCode]||=[]);
+            if(!list.some(x=>String(x.id)===String(record.id)))list.unshift(record);
+            dbCache.disciplines[dbCache.currentOrgCode]=list;
+            await offlineSaveSnapshot();
+            await offlineUpdateStatus();
+            return entry;
+        }
+        async function flushOfflineDisciplineQueue(silent=true){
+            if(offlineSyncRunning||!navigator.onLine||!offlineIdentity())return false;
+            offlineSyncRunning=true;
+            offlineLastError='';
+            await offlineUpdateStatus();
+            let sent=0;
+            try{
+                const queue=await offlineMyQueue();
+                if(!queue.length)return true;
+                const sb=window.appState?.supabase;
+                if(!sb)throw new Error('서버 연결을 준비하지 못했습니다.');
+                const {data:{session},error:authError}=await sb.auth.getSession();
+                if(authError||!session?.user||session.user.id!==dbCache.currentUser.id)throw new Error('로그인 세션을 확인해주세요.');
+                for(const entry of queue){
+                    if(!navigator.onLine)break;
+                    // Small JSON RPC per record. Abort a stalled connection and retry later.
+                    const controller=new AbortController();
+                    const timeout=setTimeout(()=>controller.abort(),25000);
+                    let data,error;
+                    try {
+                        ({data,error}=await sb.rpc('add_offline_discipline_record',{
+                            p_org_code:entry.orgCode,p_record:entry.record
+                        }).abortSignal(controller.signal));
+                    } finally {clearTimeout(timeout);}
+                    if(error||!data?.ok)throw new Error(error?.message||'서버 저장 확인 실패');
+                    await offlineStoreDelete('queue',entry.key);
+                    sent++;
+                }
+                if(sent&&!silent)showAlert(`${sent}건의 단속 기록이 중앙 서버에 저장되었습니다.`);
+                offlineRetryDelay=15000;
+                offlineRetryAt=0;
+                return sent===queue.length;
+            }catch(e){
+                offlineRetryAt=Date.now()+offlineRetryDelay;
+                offlineRetryDelay=Math.min(300000,offlineRetryDelay*2);
+                offlineLastError=String(e?.message||e).slice(0,110);
+                console.warn('오프라인 기록 동기화 실패:',e);
+                if(!silent)showAlert('전송 실패: '+offlineLastError+' · 기기 기록은 유지됩니다.');
+                return false;
+            }finally{
+                offlineSyncRunning=false;
+                await offlineUpdateStatus();
+            }
+        }
+        async function retryOfflineDisciplineSync(){
+            if(!navigator.onLine)return showAlert('인터넷이 연결되면 다시 시도해주세요.');
+            offlineRetryAt=0;
+            const ok=await flushOfflineDisciplineQueue(false);
+            if(ok)await refreshAppData(false,true);
+        }
+        async function onOfflineConnectivityRestored(){
+            // Focus/online events must not download the whole database on weak networks.
+            const pending=(await offlineMyQueue()).length;
+            const ok=pending && Date.now()>=offlineRetryAt ? await flushOfflineDisciplineQueue(true) : false;
+            if(ok&&navigator.onLine)await checkCouncilServerChanges(true);
+            else if(navigator.onLine)await checkCouncilServerChanges();
+            await offlineUpdateStatus();
+        }
+        window.addEventListener('online',()=>{onOfflineConnectivityRestored().catch(console.warn);});
+        window.addEventListener('offline',()=>{offlineUpdateStatus().catch(console.warn);});
+
         function saveLocalCache() {
             // 로컬에는 로그인 세션의 UI 상태만 저장합니다. 실제 데이터는 Supabase에 저장됩니다.
             safeStorage.setItem('sc_current_user', JSON.stringify(dbCache.currentUser));
@@ -973,10 +1209,18 @@
                     if (row.data_type === 'polls') dbCache.polls[row.org_code] = row.items || [];
                 });
 
+                await offlineOverlayPending();
+                await offlineSaveSnapshot();
+                // A very small version token enables cheap subsequent change checks.
+                try {
+                    const stamp=await sb.rpc('get_council_sync_stamp',{p_org_code:dbCache.currentOrgCode});
+                    if(!stamp.error){councilLastStamp=stamp.data;councilStampOrg=dbCache.currentOrgCode;}
+                } catch(e) { console.warn('데이터 변경 확인 초기화 실패:',e); }
+                councilLastFullRefreshAt=Date.now();
                 return true;
             } catch (e) {
                 console.error('Supabase 데이터 로드 실패:', e);
-                showAlert('서버 데이터를 불러오지 못했습니다. Supabase 테이블과 정책을 확인해주세요.');
+                if(navigator.onLine)showAlert('서버 데이터를 불러오지 못했습니다. 인터넷 연결과 Supabase 상태를 확인해주세요.');
                 return false;
             }
         }
@@ -1088,10 +1332,16 @@
         }
 
         async function syncSubColToSupabase(dataType, orgCode, items) {
+            if(!navigator.onLine){showAlert('인터넷 없음: 단속 기록 추가만 오프라인 저장됩니다. 다른 변경은 연결 후 진행해주세요.');return false;}
             const sb = requireSupabase();
             if (!sb) return false;
 
             try {
+                if(dataType==='disciplines' && (await offlineMyQueue()).length){
+                    const synced=await flushOfflineDisciplineQueue(true);
+                    if(!synced)throw new Error('미전송 단속 기록을 먼저 서버에 전송해야 합니다.');
+                    // Snapshot writes of the entire array are unsafe after offline edits. Reload before online edits.
+                }
                 const { error } = await sb.from('org_data').upsert({
                     org_code: orgCode,
                     data_type: dataType,
@@ -1112,12 +1362,18 @@
         const syncSubColToFirestore = syncSubColToSupabase;
 
         window.onload = async function() {
-            // Supabase 세션과 서버 데이터를 먼저 불러온 뒤 화면을 갱신합니다.
+            // 이전에 온라인에서 열었던 기기의 기록을 우선 복원합니다.
+            try { await offlineRestoreSnapshot(); }
+            catch(e){console.warn('오프라인 데이터 복원 실패:',e);}
             try {
-                await window.supabaseReadyPromise;
-                if (window.appState.isSupabaseReady) {
+                if(navigator.onLine) await Promise.race([
+                    window.supabaseReadyPromise,
+                    new Promise(resolve=>setTimeout(resolve,3500))
+                ]);
+                if (window.appState.isSupabaseReady && navigator.onLine) {
                     const restored = await loadCurrentUserFromSupabase();
                     if (restored) {
+                        await flushOfflineDisciplineQueue(true);
                         await loadAllFromSupabase();
                     }
                 }
@@ -1506,6 +1762,7 @@
         }
 
         async function logoutToAuth() {
+            if((await offlineMyQueue()).length&&!confirm('아직 서버에 전송하지 못한 단속 기록이 있습니다. 로그아웃하면 다시 로그인할 때까지 전송되지 않습니다. 로그아웃할까요?'))return;
             const sb = window.appState?.supabase;
             if (sb) await sb.auth.signOut();
             dbCache.currentUser = null;
@@ -1559,7 +1816,11 @@
             }catch(e){}
 
             switchTab(reopenTab);
-            setTimeout(()=>ensurePushSubscriptionSilently(), 700);
+            offlineUpdateStatus().catch(console.warn);
+            if(navigator.onLine){
+                offlineSaveSnapshot().catch(console.warn);
+                setTimeout(()=>ensurePushSubscriptionSilently(), 700);
+            }
         }
 
         function compressImageFile(file,maxSide=1600,quality=.84){
@@ -1737,7 +1998,7 @@
                         <div class="flex justify-between items-center">
                             <div>
                                 <button onclick="switchTab('discipline')" class="text-[11px] text-indigo-600 font-bold mb-1">‹ 선도</button><h2 class="text-base font-bold text-slate-800">선도 단속 관리</h2>
-                                <p class="text-[11px] text-slate-500">날짜를 누르고 아침·점심지도를 선택하면 단속 학생을 확인할 수 있습니다.</p>
+                                <p class="text-[11px] text-slate-500">날짜를 누르고 아침·점심지도를 선택하면 단속 학생을 확인할 수 있습니다. 인터넷이 없을 때도 새 단속 기록을 기기에 저장합니다.</p>
                             </div>
                             <button onclick="openDisciplineModalForAdd()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3.5 py-2 rounded-xl font-bold transition shadow-sm">+ 기록 추가</button>
                         </div>
@@ -1921,6 +2182,16 @@
                         </div>` : ''}
 
                         <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+                            <h3 class="font-bold text-slate-700"><i class="fa-solid fa-signal mr-1"></i> 인터넷 데이터 절약</h3>
+                            <div class="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl">
+                                <span class="font-bold">초저속·저용량 모드 (권장)</span>
+                                <label class="switch"><input id="council-data-saver" type="checkbox" ${councilDataSaver?'checked':''} onchange="setCouncilDataSaver(this.checked)"><span class="switch-slider"></span></label>
+                            </div>
+                            <p class="text-[10px] text-slate-500">기본 켜짐. 불필요한 전체 데이터 재다운로드를 줄이고 작은 변경 신호만 확인합니다. 단속 기록은 기기에 먼저 저장되며 약한 연결에서는 자동 재시도합니다.</p>
+                            <button onclick="runBusyAction(this,'최신 데이터 확인 중...',()=>refreshAppData(true,true))" class="w-full py-2.5 bg-indigo-50 text-indigo-700 rounded-xl font-bold">지금 최신 데이터 받기</button>
+                        </div>
+
+                        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
                             <h3 class="font-bold text-slate-700"><i class="fa-solid fa-bell mr-1"></i> 푸시 알림 설정</h3>
                             <div class="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl"><span class="font-bold">지도 전날 알림</span><label class="switch"><input id="guide-reminder-enabled" type="checkbox" onchange="savePushSettings()"><span class="switch-slider"></span></label></div>
                             <div class="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl"><span class="font-bold">전체 공지 알림</span><label class="switch"><input id="notice-push-enabled" type="checkbox" onchange="savePushSettings()"><span class="switch-slider"></span></label></div>
@@ -2066,7 +2337,7 @@
             else div.classList.add('hidden');
         }
 
-        function saveDisciplineRecord() {
+        async function saveDisciplineRecord() {
             const editId = document.getElementById('edit-record-id').value;
             const recordDate = document.getElementById('target-date').value || new Date().toISOString().slice(0, 10);
             const sessionType = document.getElementById('target-session-type').value;
@@ -2086,6 +2357,8 @@
             const list = dbCache.disciplines[dbCache.currentOrgCode] || [];
 
             if (editId) {
+                if(!navigator.onLine)return showAlert('기존 단속 기록 수정은 인터넷 연결 후 가능합니다.');
+                if((await offlineMyQueue()).length)return showAlert('미전송 단속 기록을 먼저 동기화한 뒤 수정해주세요.');
                 if(!currentUserIsAdmin())return showAlert('관리자만 단속 기록을 직접 수정할 수 있습니다.');
                 const rec = list.find(d => d.id == editId);
                 if (rec) {
@@ -2102,7 +2375,7 @@
                 showAlert('단속 기록이 수정되었습니다.');
             } else {
                 const record = {
-                    id: Date.now(),
+                    id: Date.now()*1000+Math.floor(Math.random()*1000),
                     date: recordDate,
                     sessionType: sessionType,
                     author: dbCache.currentUser.name,
@@ -2114,18 +2387,24 @@
                     reason,
                     memo
                 };
-                if (!dbCache.disciplines[dbCache.currentOrgCode]) dbCache.disciplines[dbCache.currentOrgCode] = [];
-                dbCache.disciplines[dbCache.currentOrgCode].unshift(record);
-
+                try {
+                    // Commit to durable IndexedDB BEFORE claiming success or closing the form.
+                    await queueDisciplineRecord(record);
+                } catch(e) {
+                    console.error('오프라인 기록 보관 실패:',e);
+                    showAlert('기기에 기록을 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인해주세요.');
+                    return;
+                }
                 const currentCount = dbCache.disciplines[dbCache.currentOrgCode].filter(d => d.targetKey === targetKey).length;
                 if (currentCount === 4) {
                     showAlert('5회 이상 누적 시 생활교육위원회에 회부됩니다', '⚠️ 4회 누적 경고 안내');
                 } else {
-                    showAlert('단속 기록이 저장되었습니다.');
+                    showAlert(navigator.onLine?'기기에 저장했습니다. 서버로 전송합니다.':'인터넷 없음: 기기에 안전하게 보관했습니다. 연결되면 전송합니다.');
                 }
             }
 
-            syncSubColToFirestore('disciplines', dbCache.currentOrgCode, dbCache.disciplines[dbCache.currentOrgCode]);
+            if(editId) await syncSubColToFirestore('disciplines', dbCache.currentOrgCode, dbCache.disciplines[dbCache.currentOrgCode]);
+            else if(navigator.onLine) flushOfflineDisciplineQueue(false).then(ok=>{if(ok)refreshAppData(false,true);});
 
             document.getElementById('edit-record-id').value = '';
             document.getElementById('target-name').value = '';
@@ -2345,6 +2624,7 @@
         }
 
         function bulkDeleteSession(date, sessionType) {
+            if(!navigator.onLine||offlinePendingCount)return showAlert('일괄 삭제는 미전송 기록 동기화 후 가능합니다.');
             date = decodeURIComponent(date);
             const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
             const member = org ? org.members.find(m => m.name === dbCache.currentUser.name) : null;
@@ -2362,6 +2642,7 @@
         }
 
         function bulkDeleteAllDisciplines() {
+            if(!navigator.onLine||offlinePendingCount)return showAlert('일괄 삭제는 미전송 기록 동기화 후 가능합니다.');
             const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
             const member = org ? org.members.find(m => m.name === dbCache.currentUser.name) : null;
             const role = member ? member.role : '회원';
@@ -2383,6 +2664,7 @@
         }
 
         function executeBulkDelete() {
+            if(!navigator.onLine||offlinePendingCount)return showAlert('단속 기록 삭제는 인터넷 연결 후 미전송 기록을 모두 동기화한 다음 진행해주세요.');
             if (!pendingBulkDelete) return;
             const { type, date, sessionType } = pendingBulkDelete;
             closeBulkDeleteModal();
@@ -2474,6 +2756,7 @@
         }
         function toggleDisciplineRequestEditFields(){document.getElementById('discipline-request-edit-fields')?.classList.toggle('hidden',document.getElementById('discipline-request-type')?.value==='delete')}
         async function submitDisciplineChangeRequest(){
+            if(!navigator.onLine)return showAlert('수정 요청은 인터넷 연결 후 가능합니다.');
             const why=document.getElementById('discipline-request-why').value.trim();if(!why)return showAlert('요청 사유를 입력해주세요.');
             const action=document.getElementById('discipline-request-type').value;let reason=document.getElementById('discipline-request-reason').value;
             if(action==='edit'&&reason==='기타'){reason=document.getElementById('discipline-request-other-reason').value.trim();if(!reason)return showAlert('기타 위반 사유를 작성해주세요.');}
@@ -2487,6 +2770,7 @@
             await syncSubColToFirestore('manual_requests',dbCache.currentOrgCode,list);closeModal('discipline-request-modal');showAlert('관리자에게 요청을 보냈습니다.');
         }
         async function resolveDisciplineRequest(id,approve){
+            if(!navigator.onLine||offlinePendingCount)return showAlert('관리자 승인·수정은 미전송 기록을 동기화하고 인터넷 연결 후 진행해주세요.');
             const req=(dbCache.manualRequests[dbCache.currentOrgCode]||[]).find(x=>String(x.id)===String(id));if(!req||!currentUserIsAdmin())return;
             if(approve){let list=dbCache.disciplines[dbCache.currentOrgCode]||[],r=list.find(x=>String(x.id)===String(req.recordId));if(r){if(req.action==='delete')dbCache.disciplines[dbCache.currentOrgCode]=list.filter(x=>String(x.id)!==String(req.recordId));else{r.reason=req.reason;r.memo=req.memo;if(req.recordDate)r.date=req.recordDate;if(['아침지도','점심지도'].includes(req.sessionType))r.sessionType=req.sessionType}await syncSubColToFirestore('disciplines',dbCache.currentOrgCode,dbCache.disciplines[dbCache.currentOrgCode])}}
             req.status=approve?'승인':'거절';await syncSubColToFirestore('manual_requests',dbCache.currentOrgCode,dbCache.manualRequests[dbCache.currentOrgCode]);switchTab('records');showAlert(approve?'승인해 반영했습니다.':'요청을 거절했습니다.');
@@ -2497,6 +2781,7 @@
             el.innerHTML=r.length?r.map(x=>`<div class="bg-white border rounded-xl p-3 text-xs space-y-2"><b>${x.user} · ${x.action==='delete'?'삭제':'수정'} 요청</b><p>요청 사유: ${escapeHtml(x.why||'')}</p>${x.action==='edit'?`<p class="text-indigo-700">변경 날짜: ${escapeHtml(x.recordDate||'기존 유지')} ${x.recordDate?`(${dayNameFromDate(x.recordDate)})`:''} · ${escapeHtml(x.sessionType||'기존 유지')}</p><p>위반 사유: ${escapeHtml(x.reason||'')} / 메모: ${escapeHtml(x.memo||'없음')}</p>`:''}<div class="grid grid-cols-2 gap-2"><button onclick="runBusyAction(this,'승인 처리 중...',()=>resolveDisciplineRequest(${x.id},true))" class="py-2 bg-emerald-50 text-emerald-700 rounded-lg font-bold">승인</button><button onclick="runBusyAction(this,'거절 처리 중...',()=>resolveDisciplineRequest(${x.id},false))" class="py-2 bg-rose-50 text-rose-600 rounded-lg font-bold">거절</button></div></div>`).join(''):'<p class="text-slate-400">대기 중인 요청 없음</p>';
         }
         function editDiscipline(id) {
+            if(!navigator.onLine||offlinePendingCount)return showAlert('기존 기록 수정은 미전송 기록을 동기화한 뒤 진행해주세요.');
             if(!currentUserIsAdmin())return showAlert('관리자만 단속 기록을 직접 수정할 수 있습니다.');
             const list = dbCache.disciplines[dbCache.currentOrgCode] || [];
             const r = list.find(d => d.id == id);
@@ -2518,6 +2803,8 @@
         }
 
         function deleteDiscipline(id, targetKey) {
+            if(!navigator.onLine)return showAlert('단속 기록 삭제는 인터넷 연결 후 가능합니다.');
+            if(offlinePendingCount)return showAlert('미전송 기록을 먼저 동기화해주세요.');
             let list = dbCache.disciplines[dbCache.currentOrgCode] || [];
             dbCache.disciplines[dbCache.currentOrgCode] = list.filter(d => d.id != id);
             syncSubColToFirestore('disciplines', dbCache.currentOrgCode, dbCache.disciplines[dbCache.currentOrgCode]);
@@ -4009,12 +4296,20 @@
             return String(v||'학생회').replace(/[\\/:*?"<>|]/g,'_').trim()||'학생회';
         }
 
-        function exportActivityDashboardExcel(){
+        async function exportActivityDashboardExcel(){
             if(!currentUserIsAdmin()){
                 return showAlert('관리자만 전체 회원 활동 데이터를 내보낼 수 있습니다.');
             }
             if(typeof XLSX==='undefined'){
-                return showAlert('엑셀 내보내기 기능을 불러오지 못했습니다. 인터넷 연결 후 다시 시도해주세요.');
+                if(!navigator.onLine)return showAlert('엑셀 내보내기는 최초 한 번 인터넷 연결이 필요합니다.');
+                try{
+                    await new Promise((resolve,reject)=>{
+                        const script=document.createElement('script');
+                        script.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+                        script.onload=resolve;script.onerror=()=>reject(new Error('엑셀 라이브러리 다운로드 실패'));
+                        document.head.appendChild(script);
+                    });
+                }catch(e){return showAlert('엑셀 기능을 불러오지 못했습니다. 연결 상태를 확인해주세요.');}
             }
 
             const org=currentOrg();
@@ -4597,13 +4892,16 @@
         }
         let refreshInFlight=false;
         async function refreshAppData(showDone=true,preserveScroll=false){
+            if(!navigator.onLine){await offlineUpdateStatus();if(showDone)showAlert('인터넷이 없어 기기에 저장된 기록을 표시합니다.');return false;}
             if(refreshInFlight) return true;
             refreshInFlight=true;
             const area=document.getElementById('main-content');
             const oldScroll=preserveScroll&&area?area.scrollTop:0;
             try{
                 await loadCurrentUserFromSupabase();
-                await loadAllFromSupabase();
+                await flushOfflineDisciplineQueue(true);
+                const loaded=await loadAllFromSupabase();
+                if(!loaded)return false;
                 populateDisciplineReasonsDropdown();
                 switchTab(currentTab);
                 if(preserveScroll&&area){
@@ -4628,66 +4926,67 @@
         let autoSyncChannel=null;
         let autoSyncTimer=null;
         let autoSyncDebounce=null;
+        let autoSyncInitialized=false;
 
         function scheduleSilentSync(delay=350){
-            if(!dbCache.currentUser||document.hidden) return;
+            if(!dbCache.currentUser||document.hidden||!navigator.onLine) return;
             clearTimeout(autoSyncDebounce);
             autoSyncDebounce=setTimeout(()=>{
-                refreshAppData(false,true);
+                if(councilDataSaver) checkCouncilServerChanges(true).catch(console.warn);
+                else refreshAppData(false,true);
             },delay);
         }
 
-        function initAutoSync(){
-            if(window.__studentCouncilAutoSyncReady) return;
-            window.__studentCouncilAutoSyncReady=true;
-
-            const sb=requireSupabase();
-            if(sb){
-                try{
-                    autoSyncChannel=sb
-                        .channel('student-council-live-sync')
-                        .on(
-                            'postgres_changes',
-                            {event:'*',schema:'public',table:'org_data'},
-                            ()=>scheduleSilentSync(250)
-                        )
-                        .on(
-                            'postgres_changes',
-                            {event:'*',schema:'public',table:'organizations'},
-                            ()=>scheduleSilentSync(250)
-                        )
-                        .on(
-                            'postgres_changes',
-                            {event:'UPDATE',schema:'public',table:'users'},
-                            ()=>scheduleSilentSync(350)
-                        )
-                        .subscribe((status)=>{
-                            console.log('자동 동기화:',status);
-                        });
-                }catch(e){
-                    console.warn('Realtime 자동 동기화 연결 실패:',e);
+        function updateCouncilRealtimeMode(){
+            const sb=window.appState?.supabase;
+            if(!sb || !autoSyncInitialized) return;
+            if(councilDataSaver){
+                if(autoSyncChannel){
+                    sb.removeChannel(autoSyncChannel).catch(console.warn);
+                    autoSyncChannel=null;
                 }
+                return;
             }
+            if(autoSyncChannel)return;
+            try{
+                autoSyncChannel=sb
+                    .channel('student-council-live-sync')
+                    .on('postgres_changes',{event:'*',schema:'public',table:'org_data'},()=>scheduleSilentSync(1200))
+                    .on('postgres_changes',{event:'*',schema:'public',table:'organizations'},()=>scheduleSilentSync(1200))
+                    .on('postgres_changes',{event:'UPDATE',schema:'public',table:'users'},()=>scheduleSilentSync(1200))
+                    .subscribe(status=>console.log('자동 동기화:',status));
+            }catch(e){console.warn('실시간 연결 실패:',e);}
+        }
 
-            // Realtime이 끊겨도 작은 조직에서 데이터가 오래된 채 남지 않도록 보조 동기화.
-            autoSyncTimer=setInterval(()=>{
-                if(!document.hidden&&dbCache.currentUser){
-                    refreshAppData(false,true);
-                }
-            },5000);
+        function initAutoSync(){
+            if(autoSyncInitialized)return;
+            autoSyncInitialized=true;
+            updateCouncilRealtimeMode();
+
+            // Poll a tiny revision stamp rather than reloading full data every 5 seconds.
+            // Pending writes get independent, backoff-aware retries.
+            autoSyncTimer=setInterval(async()=>{
+                if(document.hidden || !dbCache.currentUser || !navigator.onLine)return;
+                try{
+                    if(offlinePendingCount && !offlineSyncRunning && Date.now()>=offlineRetryAt){
+                        const ok=await flushOfflineDisciplineQueue(true);
+                        if(ok){await refreshAppData(false,true);return;}
+                    }
+                    await checkCouncilServerChanges();
+                }catch(e){console.warn('약한 연결 재시도 실패:',e);}
+            },12000);
 
             document.addEventListener('visibilitychange',()=>{
                 if(!document.hidden&&dbCache.currentUser){
-                    scheduleSilentSync(120);
+                    if(navigator.onLine)onOfflineConnectivityRestored().catch(console.warn);
+                    else offlineUpdateStatus().catch(console.warn);
                 }
             });
-
             window.addEventListener('focus',()=>{
-                if(dbCache.currentUser) scheduleSilentSync(120);
+                if(dbCache.currentUser) scheduleSilentSync(300);
             });
-
             window.addEventListener('online',()=>{
-                if(dbCache.currentUser) scheduleSilentSync(120);
+                if(dbCache.currentUser) scheduleSilentSync(300);
             });
         }
 
@@ -4707,7 +5006,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=44',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=48',{scope:'./',updateViaCache:'none'});
         }
         // 삼성 인터넷/안드로이드 크롬: 사용자가 버튼을 누른 즉시 권한을 요청해야
         // 비동기 로그인/서비스워커 작업 때문에 사용자 제스처가 소실되는 문제를 줄일 수 있습니다.
@@ -4862,7 +5161,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=44',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=48',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
