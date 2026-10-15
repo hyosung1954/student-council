@@ -102,7 +102,7 @@
         }
 
     </style>
-    <link rel="manifest" href="./manifest.webmanifest?v=51">
+    <link rel="manifest" href="./manifest.webmanifest?v=52">
     <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
     <link rel="apple-touch-icon" href="./icon-192.png">
     <meta name="theme-color" content="#4f46e5">
@@ -720,13 +720,26 @@
                     조직 전체 인원 한번에 초기화
                 </button>
 
+                <p class="mt-4 text-xs text-indigo-700 bg-indigo-50 rounded-xl p-3">출석 상태를 고치려면 아래 학생의 <b>출석 수정</b>을 누르세요. 초기화 버튼과는 별개이며, 출석 기록은 삭제되지 않습니다.</p>
+
                 <div class="mt-5">
                     <div class="flex items-center justify-between mb-2">
-                        <h4 class="text-xs font-bold text-slate-700">개별 초기화</h4>
+                        <h4 class="text-xs font-bold text-slate-700">개별 초기화 및 출석 수정</h4>
                         <span class="text-[10px] text-slate-400">조직원별 선택 가능</span>
                     </div>
                     <div id="activity-dashboard-member-list" class="space-y-2"></div>
                 </div>
+            </div>
+        </div>
+
+        <!-- v52: Dashboard reset management > member attendance correction -->
+        <div id="dashboard-attendance-edit-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-center justify-center p-4">
+            <div class="modal-content bg-white w-full max-w-md rounded-3xl p-5 relative shadow-2xl max-h-[85vh] flex flex-col min-h-0">
+                <button type="button" onclick="closeModal('dashboard-attendance-edit-modal')" class="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600" aria-label="닫기"><i class="fa-solid fa-xmark"></i></button>
+                <h3 id="dashboard-attendance-edit-title" class="text-lg font-bold text-slate-800 pr-10">지도 출석 상태 수정</h3>
+                <p class="text-[11px] text-slate-500 mt-2 mb-3">정상 출석·지각·결석을 선택하고 각 기록의 변경 저장을 누르세요. 이전에 초기화한 기록도 확인할 수 있습니다.</p>
+                <div id="dashboard-attendance-edit-list" class="space-y-2 overflow-y-auto min-h-0 flex-1 pb-2"></div>
+                <button type="button" onclick="closeModal('dashboard-attendance-edit-modal');openActivityDashboardResetModal()" class="mt-3 w-full py-2.5 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs">초기화 관리로 돌아가기</button>
             </div>
         </div>
 
@@ -4644,17 +4657,80 @@
                             <div class="text-sm font-bold text-slate-800">${m.name} <span class="text-indigo-600">(${m.role})</span></div>
                             <div class="text-[10px] text-slate-400 mt-1">최근 초기화: ${formatDashboardResetAt(resetAt)}</div>
                         </div>
+                        <div class="flex flex-col gap-1.5 shrink-0">
+                        <button type="button" data-member-name="${encodeURIComponent(m.name)}"
+                            onclick="openDashboardAttendanceEditor(decodeURIComponent(this.dataset.memberName))"
+                            class="px-3 py-2 bg-indigo-600 text-white rounded-xl font-bold text-[11px]">출석 수정</button>
                         <button
                             data-member-name="${encodeURIComponent(m.name)}"
                             onclick="runBusyAction(this,'초기화 중...',()=>resetOneActivityDashboard(decodeURIComponent(this.dataset.memberName)))"
                             class="shrink-0 px-3 py-2 bg-white border border-rose-200 text-rose-600 rounded-xl font-bold text-[11px]">
                             초기화
                         </button>
+                        </div>
                     </div>
                 `;
             }).join('')||'<p class="text-center text-xs text-slate-400 py-6">조직원이 없습니다.</p>';
 
             openModal('activity-dashboard-reset-modal');
+        }
+
+        // v52: 출석 상태 수정은 '활동 대시보드 초기화 관리'에서 학생별로 접근합니다.
+        let dashboardAttendanceEditingMember='';
+        function openDashboardAttendanceEditor(name){
+            if(!currentUserIsAdmin())return showAlert('관리자만 출석 상태를 수정할 수 있습니다.');
+            const org=currentOrg();
+            if(!(org?.members||[]).some(m=>m.name===name))return showAlert('조직원을 찾을 수 없습니다.');
+            dashboardAttendanceEditingMember=name;
+            const rows=(dbCache.guideAttendance[dbCache.currentOrgCode]||[])
+                .filter(a=>a.user===name&&!a.deleted)
+                .sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))||String(b.time||'').localeCompare(String(a.time||'')));
+            document.getElementById('dashboard-attendance-edit-title').textContent=name+' · 지도 출석 상태 수정';
+            document.getElementById('dashboard-attendance-edit-list').innerHTML=rows.length?rows.map(a=>{
+                const status=attendanceStatusLabel(a);
+                const option=(v,label)=>`<option value="${v}" ${status===v?'selected':''}>${label}</option>`;
+                const pending=!!a.pendingSync;
+                const beforeReset=!attendanceIsAfterDashboardReset(a);
+                return `<div class="dashboard-attendance-row rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                    <div class="text-xs font-bold text-slate-800">${escapeHtml(a.date||'날짜 미상')} · ${escapeHtml(a.type||'지도')}${a.time?' · '+escapeHtml(a.time):''}</div>
+                    <div class="text-[11px] text-slate-500">현재: ${escapeHtml(attendanceDisplayStatus(status))}${a.statusEditedBy?' · 수정자: '+escapeHtml(a.statusEditedBy):''}${beforeReset?' · <span class="text-amber-600">대시보드 초기화 이전 기록</span>':''}</div>
+                    <div class="flex gap-2 items-center">
+                        <select aria-label="출석 상태 선택" class="min-w-0 flex-1 border border-slate-300 rounded-lg bg-white p-2 text-xs" ${pending?'disabled':''}>
+                            ${option('출석','정상 출석')}${option('지각','지각')}${option('결석','결석')}
+                        </select>
+                        <button type="button" data-record-id="${encodeURIComponent(String(a.id))}" onclick="saveDashboardAttendanceStatus(this)" class="bg-indigo-600 text-white px-3 py-2 rounded-lg font-bold text-xs disabled:opacity-50" ${pending?'disabled':''}>변경 저장</button>
+                    </div>
+                    ${pending?'<p class="text-[11px] text-amber-600">오프라인 출석 기록 동기화 후 수정할 수 있습니다.</p>':''}
+                </div>`;
+            }).join(''):'<p class="text-xs text-slate-500 text-center py-8">이 학생의 지도 출석 기록이 없습니다.</p>';
+            closeModal('activity-dashboard-reset-modal');
+            openModal('dashboard-attendance-edit-modal');
+        }
+        async function saveDashboardAttendanceStatus(button){
+            if(!currentUserIsAdmin())return showAlert('관리자만 출석 상태를 수정할 수 있습니다.');
+            if(!navigator.onLine)return showAlert('인터넷에 연결한 뒤 저장해주세요.');
+            const id=decodeURIComponent(button.dataset.recordId||'');
+            const row=button.closest('.dashboard-attendance-row');
+            const status=row?.querySelector('select')?.value;
+            if(!id||!['출석','지각','결석'].includes(status))return showAlert('출석 상태를 선택해주세요.');
+            button.disabled=true;button.textContent='저장 중...';
+            try{
+                const sb=requireSupabase();
+                if(!sb)throw new Error('서버 연결을 확인해주세요.');
+                const {data,error}=await sb.rpc('admin_update_council_attendance_status',{
+                    p_org_code:dbCache.currentOrgCode,p_record_id:id,p_new_status:status,
+                    p_reason:'활동 대시보드 초기화 관리에서 관리자 정정'
+                });
+                if(error||!data?.ok)throw new Error(error?.message||'서버 저장에 실패했습니다.');
+                const loaded=await loadAllFromSupabase();
+                if(!loaded)throw new Error('서버에는 저장됐지만 목록 갱신에 실패했습니다. 새로고침해주세요.');
+                renderGuideAttendanceReport();
+                renderHomeAttendanceAlerts();
+                updateHomeDashboardData();
+                openDashboardAttendanceEditor(dashboardAttendanceEditingMember);
+                showAlert('출석 상태를 '+attendanceDisplayStatus(status)+'(으)로 변경했습니다.');
+            }catch(e){showAlert('출석 상태 수정 실패: '+(e?.message||e));}
+            finally{button.disabled=false;button.textContent='변경 저장';}
         }
 
         async function resetOneActivityDashboard(name){
@@ -5245,7 +5321,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=51',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=52',{scope:'./',updateViaCache:'none'});
         }
         // 삼성 인터넷/안드로이드 크롬: 사용자가 버튼을 누른 즉시 권한을 요청해야
         // 비동기 로그인/서비스워커 작업 때문에 사용자 제스처가 소실되는 문제를 줄일 수 있습니다.
@@ -5400,7 +5476,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=51',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=52',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
