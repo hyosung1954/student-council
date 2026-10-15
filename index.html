@@ -841,6 +841,36 @@
 
         let currentTab = 'home';
         let recordsSubTab = 'dates'; // 'dates' or 'cumulative'
+        // v45: 날짜 → 아침/점심지도 → 단속 학생 순서로 펼쳐지는 목록
+        const openDisciplineDates = new Set();
+        const openDisciplineSessions = new Set();
+        function toggleDisciplineDate(encodedDate) {
+            const date = decodeURIComponent(encodedDate);
+            if (openDisciplineDates.has(date)) openDisciplineDates.delete(date);
+            else openDisciplineDates.add(date);
+            renderDisciplineList();
+        }
+        function toggleDisciplineSession(encodedDate, session) {
+            const key = decodeURIComponent(encodedDate) + '|' + session;
+            if (openDisciplineSessions.has(key)) openDisciplineSessions.delete(key);
+            else openDisciplineSessions.add(key);
+            renderDisciplineList();
+        }
+        // v46: 학생별 누적 현황 - 학년 → 반 → 학생 단계별 펼치기
+        const openCumulativeGrades = new Set();
+        const openCumulativeClasses = new Set();
+        function toggleCumulativeGrade(encodedGrade) {
+            const grade = decodeURIComponent(encodedGrade);
+            if (openCumulativeGrades.has(grade)) openCumulativeGrades.delete(grade);
+            else openCumulativeGrades.add(grade);
+            renderDisciplineList();
+        }
+        function toggleCumulativeClass(encodedGrade, encodedClass) {
+            const key = JSON.stringify([decodeURIComponent(encodedGrade), decodeURIComponent(encodedClass)]);
+            if (openCumulativeClasses.has(key)) openCumulativeClasses.delete(key);
+            else openCumulativeClasses.add(key);
+            renderDisciplineList();
+        }
         let pendingBulkDelete = null;
 
         let dbCache = {
@@ -1707,7 +1737,7 @@
                         <div class="flex justify-between items-center">
                             <div>
                                 <button onclick="switchTab('discipline')" class="text-[11px] text-indigo-600 font-bold mb-1">‹ 선도</button><h2 class="text-base font-bold text-slate-800">선도 단속 관리</h2>
-                                <p class="text-[11px] text-slate-500">날짜별·세션별 및 누적 학생 관리</p>
+                                <p class="text-[11px] text-slate-500">날짜를 누르고 아침·점심지도를 선택하면 단속 학생을 확인할 수 있습니다.</p>
                             </div>
                             <button onclick="openDisciplineModalForAdd()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3.5 py-2 rounded-xl font-bold transition shadow-sm">+ 기록 추가</button>
                         </div>
@@ -2145,44 +2175,63 @@
                             <i class="fa-solid fa-trash-can mr-1"></i> 전체 단속 기록 일괄 삭제
                         </button>
                     </div>` : ''}
-                    <div class="space-y-4">
-                        ${sortedDates.map(dt => `
-                            <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
-                                <h3 class="font-bold text-slate-800 text-sm border-b border-slate-100 pb-2 flex items-center">
-                                    <i class="fa-regular fa-calendar-days text-indigo-600 mr-2"></i> ${dt} 단속 일지
-                                </h3>
-                                <div class="space-y-3">
+                    <div class="space-y-3">
+                        ${sortedDates.map(dt => {
+                            const dateOpen = openDisciplineDates.has(dt);
+                            const encodedDate = encodeURIComponent(dt);
+                            const total = Object.values(dateGroups[dt]).reduce((n, items) => n + items.length, 0);
+                            return `
+                            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                                <button type="button" onclick="toggleDisciplineDate('${encodedDate}')" aria-expanded="${dateOpen}" class="w-full p-4 flex items-center justify-between gap-3 text-left hover:bg-slate-50 transition">
+                                    <span class="flex items-center gap-2 min-w-0">
+                                        <i class="fa-regular fa-calendar-days text-indigo-600"></i>
+                                        <span class="font-bold text-slate-800 text-sm">${escapeHtml(dt)} 단속 일지</span>
+                                    </span>
+                                    <span class="flex items-center gap-2 shrink-0">
+                                        <span class="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-lg">${total}명</span>
+                                        <i class="fa-solid fa-chevron-${dateOpen ? 'up' : 'down'} text-slate-400 text-xs"></i>
+                                    </span>
+                                </button>
+                                ${dateOpen ? `
+                                <div class="px-3 pb-3 pt-1 border-t border-slate-100 space-y-2">
                                     ${['아침지도', '점심지도'].map(session => {
                                         const sessionItems = dateGroups[dt][session] || [];
-                                        if (sessionItems.length === 0) return '';
+                                        const sessionOpen = openDisciplineSessions.has(dt + '|' + session);
                                         return `
-                                            <div class="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-2">
-                                                <div class="flex justify-between items-center">
-                                                    <span class="px-2.5 py-1 bg-indigo-50 text-indigo-700 font-bold rounded-lg text-xs">${session} (${sessionItems.length}명)</span>
-                                                    ${isAdmin ? `
-                                                    <button onclick="runBusyAction(this,'삭제 준비 중...',()=>bulkDeleteSession('${dt}', '${session}'))" class="text-[10px] text-rose-500 hover:underline font-bold">
-                                                        <i class="fa-solid fa-trash mr-0.5"></i> ${session} 일괄삭제
-                                                    </button>` : ''}
-                                                </div>
-                                                <div class="space-y-1.5 pt-1">
-                                                    ${sessionItems.map(item => `
-                                                        <div class="bg-white p-2.5 rounded-xl border border-slate-200/60 flex justify-between items-center text-xs">
-                                                            <div>
-                                                                <span class="font-bold text-slate-800">${item.grade} ${item.classVal} ${item.number} ${item.name}</span>
-                                                                <p class="text-[11px] text-slate-500 mt-0.5">사유: ${item.reason}</p>
-                                                            </div>
-                                                            <div class="text-right">
-                                                                <span class="text-[10px] text-slate-400">단속: ${item.author}</span>
-                                                            </div>
-                                                        </div>
-                                                    `).join('')}
-                                                </div>
+                                        <div class="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden">
+                                            <div class="flex items-center gap-1 pr-3">
+                                                <button type="button" onclick="toggleDisciplineSession('${encodedDate}', '${session}')" aria-expanded="${sessionOpen}" class="flex-1 min-w-0 flex items-center justify-between gap-2 p-3 text-left hover:bg-indigo-50 transition">
+                                                    <span class="text-xs font-bold ${session === '아침지도' ? 'text-indigo-700' : 'text-amber-700'}">${session}</span>
+                                                    <span class="flex items-center gap-2 text-[11px] text-slate-500 font-semibold">
+                                                        ${sessionItems.length}명
+                                                        <i class="fa-solid fa-chevron-${sessionOpen ? 'up' : 'down'} text-slate-400 text-[10px]"></i>
+                                                    </span>
+                                                </button>
+                                                ${isAdmin && sessionItems.length ? `
+                                                <button type="button" onclick="runBusyAction(this,'삭제 준비 중...',()=>bulkDeleteSession('${encodedDate}', '${session}'))" class="text-[10px] text-rose-500 font-bold shrink-0 px-2 py-1.5 rounded-lg hover:bg-rose-50" aria-label="${session} 일괄 삭제">
+                                                    <i class="fa-solid fa-trash mr-0.5"></i> 일괄삭제
+                                                </button>` : ''}
                                             </div>
-                                        `;
+                                            ${sessionOpen ? `
+                                            <div class="p-2.5 pt-0 space-y-1.5">
+                                                ${sessionItems.length ? sessionItems.map(item => {
+                                                    const key = item.targetKey || `${item.grade}_${item.classVal}_${item.number}_${item.name}`;
+                                                    return `
+                                                    <button type="button" onclick="openDisciplineDetail(decodeURIComponent('${encodeURIComponent(key)}'))" class="w-full bg-white p-3 rounded-xl border border-slate-200 flex justify-between items-center gap-2 text-xs text-left hover:border-indigo-300 transition">
+                                                        <span class="min-w-0">
+                                                            <span class="font-bold text-slate-800">${escapeHtml(item.grade)} ${escapeHtml(item.classVal)} ${escapeHtml(item.number)} ${escapeHtml(item.name)}</span>
+                                                            <span class="text-[11px] text-slate-500 mt-0.5 block">사유: ${escapeHtml(item.reason)}</span>
+                                                            <span class="text-[10px] text-slate-400 mt-0.5 block">단속: ${escapeHtml(item.author)}</span>
+                                                        </span>
+                                                        <i class="fa-solid fa-chevron-right text-slate-300 text-[10px] shrink-0"></i>
+                                                    </button>`;
+                                                }).join('') : '<p class="text-center text-[11px] text-slate-400 py-4">해당 시간대에 단속된 학생이 없습니다.</p>'}
+                                            </div>` : ''}
+                                        </div>`;
                                     }).join('')}
-                                </div>
-                            </div>
-                        `).join('')}
+                                </div>` : ''}
+                            </div>`;
+                        }).join('')}
                     </div>
                 `;
             } else {
@@ -2219,30 +2268,84 @@
                     return nA - nB;
                 });
 
+                // 학년 → 반 → 학생 목록으로 정리. 기존 CSV 내보내기와 학생 상세보기는 유지.
+                const gradeGroups = {};
+                sortedGroups.forEach(student => {
+                    const grade = String(student.grade || '학년 미지정');
+                    const cls = String(student.classVal || '반 미지정');
+                    if (!gradeGroups[grade]) gradeGroups[grade] = {};
+                    if (!gradeGroups[grade][cls]) gradeGroups[grade][cls] = [];
+                    gradeGroups[grade][cls].push(student);
+                });
+                const compareLabels = (a, b) => String(a).localeCompare(String(b), 'ko', {numeric:true});
+                const gradeNames = Object.keys(gradeGroups).sort(compareLabels);
                 container.innerHTML = `
-                    <div class="flex justify-between items-center bg-indigo-50 p-3 rounded-xl border border-indigo-100 text-xs text-indigo-900 mb-2">
-                        <span>학생별 누적 횟수 중심 엑셀(CSV) 다운로드</span>
-                        <button onclick="exportToCSV()" class="bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold text-[11px]">CSV 다운로드</button>
+                    <div class="flex justify-between items-center gap-2 bg-indigo-50 p-3 rounded-xl border border-indigo-100 text-xs text-indigo-900 mb-2">
+                        <span>학년 → 반 → 학생별 누적 현황</span>
+                        <button onclick="exportToCSV()" class="bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold text-[11px] shrink-0">CSV 다운로드</button>
                     </div>
                     <div class="space-y-3">
-                        ${sortedGroups.map(g => `
-                            <div onclick="openDisciplineDetail('${g.targetKey}')" class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex justify-between items-center cursor-pointer hover:border-indigo-500 transition text-xs">
-                                <div class="space-y-1">
-                                    <div class="font-bold text-slate-800 text-sm">${g.grade} ${g.classVal} ${g.number} ${g.name}</div>
-                                    <p class="text-slate-500 text-[11px]">클릭하여 상세 위반 기록 확인 및 관리</p>
-                                </div>
-                                <div class="text-right">
-                                    <span class="px-3 py-1 rounded-xl bg-indigo-50 text-indigo-600 font-bold text-xs shadow-sm">누적 ${g.records.length}회</span>
-                                    <div class="text-[10px] text-slate-400 mt-1">상세보기 &gt;</div>
-                                </div>
-                            </div>
-                        `).join('')}
+                        ${gradeNames.map(grade => {
+                            const classGroups = gradeGroups[grade];
+                            const classNames = Object.keys(classGroups).sort(compareLabels);
+                            const students = classNames.flatMap(cls => classGroups[cls]);
+                            const totalRecords = students.reduce((sum, g) => sum + g.records.length, 0);
+                            const gradeOpen = openCumulativeGrades.has(grade);
+                            const encodedGrade = encodeURIComponent(grade);
+                            return `
+                            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                                <button type="button" onclick="toggleCumulativeGrade('${encodedGrade}')" aria-expanded="${gradeOpen}" class="w-full p-4 flex items-center justify-between gap-2 text-left hover:bg-slate-50 transition">
+                                    <span class="flex items-center gap-2 min-w-0">
+                                        <i class="fa-solid fa-graduation-cap text-indigo-600"></i>
+                                        <span class="font-bold text-slate-800 text-sm">${escapeHtml(grade)}</span>
+                                    </span>
+                                    <span class="flex items-center gap-2 shrink-0 text-[11px]">
+                                        <span class="text-slate-500">${students.length}명 · ${totalRecords}회</span>
+                                        <i class="fa-solid fa-chevron-${gradeOpen ? 'up' : 'down'} text-slate-400"></i>
+                                    </span>
+                                </button>
+                                ${gradeOpen ? `
+                                <div class="px-3 pb-3 pt-1 border-t border-slate-100 space-y-2">
+                                    ${classNames.map(cls => {
+                                        const classStudents = classGroups[cls];
+                                        const classTotal = classStudents.reduce((sum, g) => sum + g.records.length, 0);
+                                        const classOpen = openCumulativeClasses.has(JSON.stringify([grade, cls]));
+                                        const encodedClass = encodeURIComponent(cls);
+                                        return `
+                                        <div class="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden">
+                                            <button type="button" onclick="toggleCumulativeClass('${encodedGrade}', '${encodedClass}')" aria-expanded="${classOpen}" class="w-full p-3 flex items-center justify-between gap-2 text-left hover:bg-indigo-50 transition">
+                                                <span class="font-bold text-slate-700 text-xs"><i class="fa-solid fa-users text-slate-400 mr-1.5"></i>${escapeHtml(cls)}</span>
+                                                <span class="flex items-center gap-2 text-[11px] text-slate-500 shrink-0">
+                                                    ${classStudents.length}명 · ${classTotal}회
+                                                    <i class="fa-solid fa-chevron-${classOpen ? 'up' : 'down'} text-slate-400 text-[10px]"></i>
+                                                </span>
+                                            </button>
+                                            ${classOpen ? `
+                                            <div class="p-2.5 pt-0 space-y-1.5">
+                                                ${classStudents.map(g => `
+                                                <button type="button" onclick="openDisciplineDetail(decodeURIComponent('${encodeURIComponent(g.targetKey)}'))" class="w-full bg-white p-3 rounded-xl border border-slate-200 flex justify-between items-center gap-2 text-xs text-left hover:border-indigo-300 transition">
+                                                    <span class="min-w-0 text-left">
+                                                        <span class="font-bold text-slate-800">${escapeHtml(g.number)} ${escapeHtml(g.name)}</span>
+                                                        <span class="block text-[10px] text-slate-400 mt-1">눌러서 위반 기록 확인</span>
+                                                    </span>
+                                                    <span class="flex items-center gap-2 shrink-0">
+                                                        <span class="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-600 font-bold text-[11px]">누적 ${g.records.length}회</span>
+                                                        <i class="fa-solid fa-chevron-right text-slate-300 text-[10px]"></i>
+                                                    </span>
+                                                </button>`).join('')}
+                                            </div>` : ''}
+                                        </div>`;
+                                    }).join('')}
+                                </div>` : ''}
+                            </div>`;
+                        }).join('')}
                     </div>
                 `;
             }
         }
 
         function bulkDeleteSession(date, sessionType) {
+            date = decodeURIComponent(date);
             const org = dbCache.orgs.find(o => o.code === dbCache.currentOrgCode);
             const member = org ? org.members.find(m => m.name === dbCache.currentUser.name) : null;
             const role = member ? member.role : '회원';
