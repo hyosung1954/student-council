@@ -103,7 +103,7 @@
         }
 
     </style>
-    <link rel="manifest" href="./manifest.webmanifest?v=43">
+    <link rel="manifest" href="./manifest.webmanifest?v=44">
     <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
     <link rel="apple-touch-icon" href="./icon-192.png">
     <meta name="theme-color" content="#4f46e5">
@@ -389,13 +389,29 @@
 
 
         <div id="discipline-request-modal" class="modal-overlay fixed inset-0 bg-black/60 hidden flex items-end justify-center">
-            <div class="modal-content bg-white w-full max-w-md rounded-t-3xl p-6 relative">
+            <div class="modal-content bg-white w-full max-w-md rounded-t-3xl p-6 relative max-h-[88dvh] overflow-y-auto">
                 <button onclick="closeModal('discipline-request-modal')" class="absolute top-5 right-5 w-8 h-8 rounded-full bg-slate-100"><i class="fa-solid fa-xmark"></i></button>
                 <h3 class="text-lg font-bold text-indigo-600 mb-4">선도 기록 변경 요청</h3>
                 <input id="discipline-request-record-id" type="hidden">
                 <div class="space-y-3 text-xs">
                     <select id="discipline-request-type" onchange="toggleDisciplineRequestEditFields()" class="w-full bg-slate-50 border p-2 rounded-xl font-bold"><option value="edit">수정 요청</option><option value="delete">삭제 요청</option></select>
                     <div id="discipline-request-edit-fields" class="space-y-2">
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block font-bold text-slate-700 mb-1">단속 날짜</label>
+                                <input id="discipline-request-date" type="date" onchange="syncDisciplineRequestWeekdayFromDate()" class="w-full bg-slate-50 border p-2 rounded-xl font-bold">
+                            </div>
+                            <div>
+                                <label class="block font-bold text-slate-700 mb-1">요일 변경</label>
+                                <select id="discipline-request-weekday" onchange="setDisciplineRequestWeekday()" class="w-full bg-slate-50 border p-2 rounded-xl font-bold">
+                                    <option value="0">일요일</option><option value="1">월요일</option><option value="2">화요일</option><option value="3">수요일</option><option value="4">목요일</option><option value="5">금요일</option><option value="6">토요일</option>
+                                </select>
+                            </div>
+                        </div>
+                        <p class="text-[10px] text-slate-500">요일을 바꾸면 해당 주의 날짜도 함께 변경됩니다.</p>
+                        <label class="block font-bold text-slate-700">단속 시간대</label>
+                        <select id="discipline-request-session" class="w-full bg-slate-50 border p-2 rounded-xl font-bold"><option value="아침지도">아침지도</option><option value="점심지도">점심지도</option></select>
+                        <label class="block font-bold text-slate-700">위반 사유</label>
                         <select id="discipline-request-reason" onchange="toggleDisciplineRequestOtherReason()" class="w-full bg-slate-50 border p-2 rounded-xl font-bold"></select>
                         <input id="discipline-request-other-reason" placeholder="기타 위반 사유를 작성해주세요" class="hidden w-full bg-slate-50 border p-2 rounded-xl">
                         <textarea id="discipline-request-memo" placeholder="변경할 메모" class="w-full bg-slate-50 border p-2 rounded-xl h-16"></textarea>
@@ -2040,6 +2056,7 @@
             const list = dbCache.disciplines[dbCache.currentOrgCode] || [];
 
             if (editId) {
+                if(!currentUserIsAdmin())return showAlert('관리자만 단속 기록을 직접 수정할 수 있습니다.');
                 const rec = list.find(d => d.id == editId);
                 if (rec) {
                     rec.date = recordDate;
@@ -2333,26 +2350,51 @@
         function toggleDisciplineRequestOtherReason(){const sel=document.getElementById('discipline-request-reason'),other=document.getElementById('discipline-request-other-reason');if(other)other.classList.toggle('hidden',sel?.value!=='기타')}
         function openDisciplineChangeRequest(id){
             const r=(dbCache.disciplines[dbCache.currentOrgCode]||[]).find(x=>String(x.id)===String(id));if(!r)return;
-            document.getElementById('discipline-request-record-id').value=id;document.getElementById('discipline-request-type').value='edit';fillDisciplineRequestReasons(r.reason||'');document.getElementById('discipline-request-memo').value=r.memo||'';document.getElementById('discipline-request-why').value='';toggleDisciplineRequestEditFields();openModal('discipline-request-modal');
+            document.getElementById('discipline-request-record-id').value=id;document.getElementById('discipline-request-type').value='edit';fillDisciplineRequestReasons(r.reason||'');document.getElementById('discipline-request-memo').value=r.memo||'';document.getElementById('discipline-request-why').value='';
+            document.getElementById('discipline-request-date').value=r.date||localDateStr();
+            document.getElementById('discipline-request-session').value=r.sessionType||'아침지도';
+            syncDisciplineRequestWeekdayFromDate();toggleDisciplineRequestEditFields();openModal('discipline-request-modal');
+        }
+        function syncDisciplineRequestWeekdayFromDate(){
+            const date=document.getElementById('discipline-request-date')?.value;
+            const weekday=document.getElementById('discipline-request-weekday');
+            if(date&&weekday)weekday.value=String(new Date(date+'T12:00:00').getDay());
+        }
+        function setDisciplineRequestWeekday(){
+            const input=document.getElementById('discipline-request-date');
+            const select=document.getElementById('discipline-request-weekday');
+            if(!input||!select)return;
+            const current=new Date((input.value||localDateStr())+'T12:00:00');
+            if(Number.isNaN(current.getTime()))return;
+            current.setDate(current.getDate()+Number(select.value)-current.getDay());
+            input.value=`${current.getFullYear()}-${String(current.getMonth()+1).padStart(2,'0')}-${String(current.getDate()).padStart(2,'0')}`;
         }
         function toggleDisciplineRequestEditFields(){document.getElementById('discipline-request-edit-fields')?.classList.toggle('hidden',document.getElementById('discipline-request-type')?.value==='delete')}
         async function submitDisciplineChangeRequest(){
             const why=document.getElementById('discipline-request-why').value.trim();if(!why)return showAlert('요청 사유를 입력해주세요.');
             const action=document.getElementById('discipline-request-type').value;let reason=document.getElementById('discipline-request-reason').value;
             if(action==='edit'&&reason==='기타'){reason=document.getElementById('discipline-request-other-reason').value.trim();if(!reason)return showAlert('기타 위반 사유를 작성해주세요.');}
-            const list=(dbCache.manualRequests[dbCache.currentOrgCode]||=[]);list.unshift({id:Date.now(),kind:'discipline_change',user:dbCache.currentUser.name,recordId:document.getElementById('discipline-request-record-id').value,action,reason,memo:document.getElementById('discipline-request-memo').value.trim(),why,status:'대기중',date:new Date().toLocaleString()});
+            const recordId=document.getElementById('discipline-request-record-id').value;
+            const record=(dbCache.disciplines[dbCache.currentOrgCode]||[]).find(x=>String(x.id)===String(recordId));
+            if(!record)return showAlert('원본 단속 기록을 찾을 수 없습니다.');
+            const date=document.getElementById('discipline-request-date').value;
+            const sessionType=document.getElementById('discipline-request-session').value;
+            if(action==='edit'&&(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!['아침지도','점심지도'].includes(sessionType)))return showAlert('날짜와 시간대를 확인해주세요.');
+            const list=(dbCache.manualRequests[dbCache.currentOrgCode]||=[]);list.unshift({id:Date.now(),kind:'discipline_change',user:dbCache.currentUser.name,recordId,action,reason,memo:document.getElementById('discipline-request-memo').value.trim(),recordDate:date,sessionType,why,status:'대기중',date:new Date().toLocaleString()});
             await syncSubColToFirestore('manual_requests',dbCache.currentOrgCode,list);closeModal('discipline-request-modal');showAlert('관리자에게 요청을 보냈습니다.');
         }
         async function resolveDisciplineRequest(id,approve){
             const req=(dbCache.manualRequests[dbCache.currentOrgCode]||[]).find(x=>String(x.id)===String(id));if(!req||!currentUserIsAdmin())return;
-            if(approve){let list=dbCache.disciplines[dbCache.currentOrgCode]||[],r=list.find(x=>String(x.id)===String(req.recordId));if(r){if(req.action==='delete')dbCache.disciplines[dbCache.currentOrgCode]=list.filter(x=>String(x.id)!==String(req.recordId));else{r.reason=req.reason;r.memo=req.memo}await syncSubColToFirestore('disciplines',dbCache.currentOrgCode,dbCache.disciplines[dbCache.currentOrgCode])}}
+            if(approve){let list=dbCache.disciplines[dbCache.currentOrgCode]||[],r=list.find(x=>String(x.id)===String(req.recordId));if(r){if(req.action==='delete')dbCache.disciplines[dbCache.currentOrgCode]=list.filter(x=>String(x.id)!==String(req.recordId));else{r.reason=req.reason;r.memo=req.memo;if(req.recordDate)r.date=req.recordDate;if(['아침지도','점심지도'].includes(req.sessionType))r.sessionType=req.sessionType}await syncSubColToFirestore('disciplines',dbCache.currentOrgCode,dbCache.disciplines[dbCache.currentOrgCode])}}
             req.status=approve?'승인':'거절';await syncSubColToFirestore('manual_requests',dbCache.currentOrgCode,dbCache.manualRequests[dbCache.currentOrgCode]);switchTab('records');showAlert(approve?'승인해 반영했습니다.':'요청을 거절했습니다.');
         }
+        function escapeHtml(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
         function renderDisciplineChangeRequests(){
             const el=document.getElementById('discipline-change-requests');if(!el)return;const r=(dbCache.manualRequests[dbCache.currentOrgCode]||[]).filter(x=>x.kind==='discipline_change'&&x.status==='대기중');
-            el.innerHTML=r.length?r.map(x=>`<div class="bg-white border rounded-xl p-3 text-xs space-y-2"><b>${x.user} · ${x.action==='delete'?'삭제':'수정'} 요청</b><p>사유: ${x.why}</p><div class="grid grid-cols-2 gap-2"><button onclick="runBusyAction(this,'승인 처리 중...',()=>resolveDisciplineRequest(${x.id},true))" class="py-2 bg-emerald-50 text-emerald-700 rounded-lg font-bold">승인</button><button onclick="runBusyAction(this,'거절 처리 중...',()=>resolveDisciplineRequest(${x.id},false))" class="py-2 bg-rose-50 text-rose-600 rounded-lg font-bold">거절</button></div></div>`).join(''):'<p class="text-slate-400">대기 중인 요청 없음</p>';
+            el.innerHTML=r.length?r.map(x=>`<div class="bg-white border rounded-xl p-3 text-xs space-y-2"><b>${x.user} · ${x.action==='delete'?'삭제':'수정'} 요청</b><p>요청 사유: ${escapeHtml(x.why||'')}</p>${x.action==='edit'?`<p class="text-indigo-700">변경 날짜: ${escapeHtml(x.recordDate||'기존 유지')} ${x.recordDate?`(${dayNameFromDate(x.recordDate)})`:''} · ${escapeHtml(x.sessionType||'기존 유지')}</p><p>위반 사유: ${escapeHtml(x.reason||'')} / 메모: ${escapeHtml(x.memo||'없음')}</p>`:''}<div class="grid grid-cols-2 gap-2"><button onclick="runBusyAction(this,'승인 처리 중...',()=>resolveDisciplineRequest(${x.id},true))" class="py-2 bg-emerald-50 text-emerald-700 rounded-lg font-bold">승인</button><button onclick="runBusyAction(this,'거절 처리 중...',()=>resolveDisciplineRequest(${x.id},false))" class="py-2 bg-rose-50 text-rose-600 rounded-lg font-bold">거절</button></div></div>`).join(''):'<p class="text-slate-400">대기 중인 요청 없음</p>';
         }
         function editDiscipline(id) {
+            if(!currentUserIsAdmin())return showAlert('관리자만 단속 기록을 직접 수정할 수 있습니다.');
             const list = dbCache.disciplines[dbCache.currentOrgCode] || [];
             const r = list.find(d => d.id == id);
             if (!r) return;
@@ -4562,7 +4604,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=43',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=44',{scope:'./',updateViaCache:'none'});
         }
         // 삼성 인터넷/안드로이드 크롬: 사용자가 버튼을 누른 즉시 권한을 요청해야
         // 비동기 로그인/서비스워커 작업 때문에 사용자 제스처가 소실되는 문제를 줄일 수 있습니다.
@@ -4587,11 +4629,22 @@
             const sb=requireSupabase(); if(!sb) return false;
             const {data:{user},error:userError}=await sb.auth.getUser();
             if(userError||!user) throw new Error('로그인 정보를 확인할 수 없습니다.');
+            // 서버가 실제 발송에 사용하는 VAPID 공개키를 받아 브라우저 구독과 일치시킵니다.
+            const {data:keyConfig,error:keyError}=await sb.functions.invoke('send-council-push',{body:{kind:'push_config'}});
+            if(keyError||!keyConfig?.vapidPublicKey)throw new Error('서버 푸시 공개키를 확인할 수 없습니다. 서버 알림 함수를 업데이트해주세요.');
             const reg=await getPushRegistration();
             if(!reg.pushManager){
                 throw new Error('현재 브라우저 또는 바로가기에서는 푸시 구독을 사용할 수 없습니다. Chrome에서 학생회 웹앱을 앱으로 설치해 시도해주세요.');
             }
             let sub=await reg.pushManager.getSubscription();
+            // 앱의 VAPID 공개키가 바뀐 경우 예전 브라우저 구독을 새 키로 교체합니다.
+            const expectedKey=urlBase64ToUint8Array(keyConfig.vapidPublicKey);
+            if(sub&&sub.options?.applicationServerKey){
+                const oldKey=new Uint8Array(sub.options.applicationServerKey);
+                if(oldKey.length!==expectedKey.length||oldKey.some((v,i)=>v!==expectedKey[i])){
+                    await sub.unsubscribe();sub=null;
+                }
+            }
 
             const anyEnabled=!!enabled||!!noticeEnabled||!!meetingEnabled||!!pollEnabled;
             if(!anyEnabled){
@@ -4606,7 +4659,7 @@
 
             if(!sub) sub=await reg.pushManager.subscribe({
                 userVisibleOnly:true,
-                applicationServerKey:urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+                applicationServerKey:expectedKey
             });
             const j=sub.toJSON();
             const {error}=await sb.from('push_subscriptions').upsert({
@@ -4660,8 +4713,10 @@
                 });
 
                 if(error)throw error;
+                if(data?.error)return showAlert('테스트 알림 실패: '+data.error);
                 if((data?.sent||0)>0)showAlert('테스트 알림을 보냈습니다. 잠시 후 기기 알림을 확인해주세요.');
-                else showAlert('등록된 푸시 기기를 찾지 못했습니다. 알림 권한 허용 버튼을 다시 눌러주세요.');
+                else if((data?.matched||0)>0)showAlert(`기기 ${data.matched}대 확인, 발송 ${data.failed||0}건 실패. ${data?.failureReasons?.[0]||'서버 푸시 인증키(VAPID)를 확인해주세요.'}`);
+                else showAlert('현재 계정으로 등록된 푸시 기기가 없습니다. 알림 권한 허용을 다시 눌러주세요.');
             }catch(e){
                 console.error('테스트 푸시 실패:',e);
                 showAlert('테스트 알림 실패: '+(e?.message||e));
@@ -4704,7 +4759,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=43',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=44',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
