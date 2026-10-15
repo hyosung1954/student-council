@@ -1,7 +1,7 @@
 
-/* Student Council PWA v51: fresh HTML online, offline shell when disconnected. */
-const STATIC_CACHE = 'student-council-shell-v51';
-const CDN_CACHE = 'student-council-vendor-v51';
+/* Student Council PWA v52: fresh HTML online, offline shell when disconnected. */
+const STATIC_CACHE = 'student-council-shell-v52';
+const CDN_CACHE = 'student-council-vendor-v52';
 const SHELL = ['./index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 const VENDORS = [
   'https://cdn.tailwindcss.com',
