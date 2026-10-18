@@ -102,7 +102,7 @@
         }
 
     </style>
-    <link rel="manifest" href="./manifest.webmanifest?v=53">
+    <link rel="manifest" href="./manifest.webmanifest?v=54">
     <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
     <link rel="apple-touch-icon" href="./icon-192.png">
     <meta name="theme-color" content="#4f46e5">
@@ -2149,9 +2149,13 @@
                         </div>
                         ${isAdmin ? `<div class="bg-amber-50 border border-amber-200 rounded-2xl p-3 space-y-2">
                             <div class="font-bold text-amber-800">지도 중지</div>
-                            <p class="text-[11px] text-slate-600">공휴일·휴업일 등에 사용합니다. 오늘부터 선택한 날짜까지 지도 일정·지도 출석만 중지되고 다른 기능은 그대로 작동합니다.</p>
-                            <div class="flex gap-2"><input id="duty-pause-until" type="date" class="flex-1 bg-white border border-amber-200 px-3 py-2 rounded-xl"><button onclick="runBusyAction(this,'중지 처리 중...',()=>pauseDutiesUntil())" class="px-3 py-2 bg-amber-600 text-white rounded-xl font-bold">중지</button></div>
-                            <div id="duty-pause-status"></div>
+                            <p class="text-[11px] text-slate-600">공휴일·시험 기간 등에 지도 활동을 쉬는 날짜를 설정합니다. 시작일과 종료일을 모두 포함하며, 지도 일정·지도 출석만 중지됩니다. 다른 기능은 계속 사용할 수 있습니다.</p>
+                            <div class="grid grid-cols-2 gap-2">
+                                <label class="block text-[11px] font-bold text-amber-900">중지 시작일<input id="duty-pause-from" type="date" value="${localDateStr()}" class="mt-1 w-full min-w-0 bg-white border border-amber-200 px-2 py-2 rounded-xl text-slate-800"></label>
+                                <label class="block text-[11px] font-bold text-amber-900">중지 종료일<input id="duty-pause-until" type="date" value="${localDateStr()}" class="mt-1 w-full min-w-0 bg-white border border-amber-200 px-2 py-2 rounded-xl text-slate-800"></label>
+                            </div>
+                            <button onclick="runBusyAction(this,'중지 기간 저장 중...',()=>pauseDutiesUntil())" class="w-full px-3 py-2.5 bg-amber-600 text-white rounded-xl font-bold">지도 중지 기간 저장</button>
+                            <div id="duty-pause-status" class="space-y-2"></div>
                         </div>` : ''}
                         <div id="duty-schedule-list" class="space-y-3"></div>
                         <div class="border-t border-slate-200 pt-3">
@@ -3017,31 +3021,52 @@
             await syncSubColToFirestore('duties',dbCache.currentOrgCode,list);closeModal('duty-modal');renderDutyScheduleList();updateHomeDashboardData();showAlert(`${endDate}까지 선도 지도 일정이 배정되었습니다.`);
         }
 
+        // v54: Date-range pauses; supports future reservations and multiple non-overlapping periods.
         function getDutyPause(){
-            const today = localDateStr();
+            const today=localDateStr();
             return (dbCache.duties[dbCache.currentOrgCode] || []).find(x => x.kind === 'pause' && x.startDate <= today && today <= x.endDate) || null;
         }
         function isDutyPausedOn(dateStr){
             return (dbCache.duties[dbCache.currentOrgCode] || []).some(x => x.kind === 'pause' && x.startDate <= dateStr && dateStr <= x.endDate);
         }
         async function pauseDutiesUntil(){
-            if (!currentUserIsAdmin()) return showAlert('관리자만 지도를 중지할 수 있습니다.');
-            const endDate = document.getElementById('duty-pause-until')?.value;
-            if (!endDate) return showAlert('지도 중지 종료일을 선택해주세요.');
-            const today = localDateStr();
-            if (endDate < today) return showAlert('오늘 이후 날짜를 선택해주세요.');
-            const list = (dbCache.duties[dbCache.currentOrgCode] ||= []);
-            dbCache.duties[dbCache.currentOrgCode] = list.filter(x => x.kind !== 'pause');
-            dbCache.duties[dbCache.currentOrgCode].unshift({id:Date.now(), kind:'pause', startDate:today, endDate});
-            await syncSubColToFirestore('duties', dbCache.currentOrgCode, dbCache.duties[dbCache.currentOrgCode]);
-            renderDutyScheduleList(); updateHomeDashboardData();
-            showAlert(`오늘부터 ${endDate}까지 지도 일정과 지도 출석을 중지했습니다.`);
+            if (!currentUserIsAdmin()) return showAlert('관리자만 지도 중지 기간을 설정할 수 있습니다.');
+            const startDate=document.getElementById('duty-pause-from')?.value;
+            const endDate=document.getElementById('duty-pause-until')?.value;
+            if (!startDate || !endDate) return showAlert('지도 중지 시작일과 종료일을 모두 선택해주세요.');
+            if (endDate < startDate) return showAlert('종료일은 시작일과 같거나 이후여야 합니다.');
+            if (endDate < localDateStr()) return showAlert('이미 지난 기간은 새로 중지할 수 없습니다.');
+            if (!navigator.onLine) return showAlert('지도 중지 기간 설정은 인터넷 연결 후 가능합니다.');
+            const list=(dbCache.duties[dbCache.currentOrgCode] || []).slice();
+            const overlaps=list.some(x=>x.kind==='pause' && x.startDate<=endDate && startDate<=x.endDate);
+            if (overlaps) return showAlert('기존 지도 중지 기간과 겹칩니다. 기존 기간을 해제하거나 겹치지 않는 날짜를 선택해주세요.');
+            const newPause={id:Date.now(),kind:'pause',startDate,endDate};
+            const updated=[newPause,...list];
+            try{
+                const saved=await syncSubColToFirestore('duties',dbCache.currentOrgCode,updated);
+                if(!saved) return;
+                dbCache.duties[dbCache.currentOrgCode]=updated;
+                renderDutyScheduleList();updateHomeDashboardData();
+                showAlert(`${startDate}부터 ${endDate}까지 지도 중지 기간을 저장했습니다.`);
+            }catch(e){showAlert('지도 중지 기간 저장 실패: '+(e?.message||e));}
+        }
+        async function deleteDutyPause(id){
+            if (!currentUserIsAdmin()) return showAlert('관리자만 지도 중지를 해제할 수 있습니다.');
+            if (!navigator.onLine) return showAlert('지도 중지 해제는 인터넷 연결 후 가능합니다.');
+            const list=(dbCache.duties[dbCache.currentOrgCode]||[]);
+            const updated=list.filter(x=>!(x.kind==='pause' && String(x.id)===String(id)));
+            if (updated.length===list.length) return showAlert('해제할 지도 중지 기간을 찾지 못했습니다.');
+            try{
+                const saved=await syncSubColToFirestore('duties',dbCache.currentOrgCode,updated);
+                if(!saved) return;
+                dbCache.duties[dbCache.currentOrgCode]=updated;
+                renderDutyScheduleList();updateHomeDashboardData();showAlert('선택한 지도 중지 기간을 해제했습니다.');
+            }catch(e){showAlert('지도 중지 해제 실패: '+(e?.message||e));}
         }
         async function resumeDuties(){
-            if (!currentUserIsAdmin()) return showAlert('관리자만 지도 중지를 해제할 수 있습니다.');
-            dbCache.duties[dbCache.currentOrgCode] = (dbCache.duties[dbCache.currentOrgCode] || []).filter(x => x.kind !== 'pause');
-            await syncSubColToFirestore('duties', dbCache.currentOrgCode, dbCache.duties[dbCache.currentOrgCode]);
-            renderDutyScheduleList(); updateHomeDashboardData(); showAlert('지도 중지를 해제했습니다.');
+            const pause=getDutyPause();
+            if(!pause)return showAlert('현재 진행 중인 지도 중지 기간이 없습니다.');
+            return deleteDutyPause(pause.id);
         }
 
         function nextDateForDutyBase(base){
@@ -3106,9 +3131,16 @@
             const status=document.getElementById('duty-pause-status');
 
             if(status){
-                status.innerHTML=pause
-                    ? `<div class="text-amber-700 font-bold">현재 ${pause.endDate}까지 지도 중지 중 <button onclick="runBusyAction(this,'중지 해제 중...',()=>resumeDuties())" class="ml-2 underline">지금 해제</button></div>`
-                    : '<div class="text-slate-500">현재 지도 중지 없음</div>';
+                const today=localDateStr();
+                const pauses=(dbCache.duties[dbCache.currentOrgCode]||[])
+                    .filter(x=>x.kind==='pause'&&x.endDate>=today)
+                    .sort((a,b)=>String(a.startDate).localeCompare(String(b.startDate)));
+                status.innerHTML=pauses.length
+                    ? `<div class="font-bold text-xs text-amber-900">설정된 지도 중지 기간</div>`+pauses.map(p=>{
+                        const active=p.startDate<=today&&today<=p.endDate;
+                        return `<div class="bg-white border border-amber-200 rounded-xl px-3 py-2 flex items-center justify-between gap-2"><div class="min-w-0"><div class="text-xs font-bold text-slate-800">${p.startDate} ~ ${p.endDate}</div><div class="text-[11px] ${active?'text-amber-700':'text-slate-500'}">${active?'현재 중지 중':'예정된 중지 기간'}</div></div><button onclick="runBusyAction(this,'해제 중...',()=>deleteDutyPause(${JSON.stringify(p.id)}))" class="shrink-0 text-xs font-bold text-rose-600 bg-rose-50 px-2 py-1.5 rounded-lg">해제</button></div>`;
+                    }).join('')
+                    : '<div class="text-xs text-slate-500">설정된 지도 중지 기간이 없습니다.</div>';
             }
 
             if(!list.length){
@@ -5321,7 +5353,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=53',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=54',{scope:'./',updateViaCache:'none'});
         }
         // 삼성 인터넷/안드로이드 크롬: 사용자가 버튼을 누른 즉시 권한을 요청해야
         // 비동기 로그인/서비스워커 작업 때문에 사용자 제스처가 소실되는 문제를 줄일 수 있습니다.
@@ -5476,7 +5508,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=53',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=54',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
