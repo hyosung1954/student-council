@@ -102,7 +102,7 @@
         }
 
     </style>
-    <link rel="manifest" href="./manifest.webmanifest?v=54">
+    <link rel="manifest" href="./manifest.webmanifest?v=55">
     <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
     <link rel="apple-touch-icon" href="./icon-192.png">
     <meta name="theme-color" content="#4f46e5">
@@ -636,10 +636,10 @@
                 <button onclick="closeModal('guide-attendance-modal')" class="absolute top-5 right-5 w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button>
                 <h3 class="text-lg font-bold text-indigo-600 mb-4">지도 출석 기록</h3>
                 <div class="space-y-3 text-xs">
-                    <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-3 text-indigo-700 leading-relaxed">오늘 실제로 배정된 지도 일정만 출석할 수 있습니다. 인터넷이 없어도 출석 버튼을 누른 기기 시각을 기록하고, 연결되면 그 시각을 기준으로 출석·지각·결석을 반영합니다. 오프라인 출석은 관리자 확인 표시가 남습니다.</div>
+                    <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-3 text-indigo-700 leading-relaxed">지도 시작 시간이 되면 서버에서 정상 출석으로 자동 기록됩니다. 학생은 버튼을 누를 필요가 없습니다. 실제 참여 여부를 확인한 관리자는 대시보드 초기화 관리에서 지각·결석으로 변경할 수 있습니다.</div>
                     <div><label class="block font-bold mb-1">오늘의 지도 일정</label><select id="guide-att-assignment" onchange="refreshGuideAttendanceWindow()" class="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl"></select></div>
                     <div id="guide-att-window-info" class="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-600"></div>
-                    <button id="guide-att-submit-btn" onclick="runBusyAction(this,'출석 처리 중...',()=>submitGuideAttendance())" class="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold disabled:bg-slate-300 disabled:cursor-not-allowed">지도 출석하기 (1시간 인정)</button>
+                    <button id="guide-att-submit-btn" onclick="closeModal('guide-attendance-modal')" class="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold">확인</button>
                 </div>
             </div>
         </div>
@@ -2081,7 +2081,7 @@
                             <div id="home-duty-preview" class="text-xs text-slate-500">배정된 지도 일정을 확인하세요.</div>
                             <div id="home-attendance-alerts" class="space-y-2"></div>
                             <div class="grid grid-cols-2 gap-2 mt-1">
-                                <button onclick="openGuideAttendanceModal()" class="py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs">지도 출석하기</button>
+                                <button onclick="openGuideAttendanceModal()" class="py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs">자동 출석 확인</button>
                                 <button onclick="openSwapModal()" class="py-2 bg-slate-100 hover:bg-slate-200 text-indigo-600 rounded-xl font-bold text-xs transition">대체 근무 신청</button>
                             </div>
                         </div>
@@ -3463,22 +3463,10 @@
             if(diff <= 40) return {phase:'late',diff,scheduled};
             return {phase:'absent',diff,scheduled};
         }
-        async function checkAttendanceDeadlines(){
-            // Offline writes of whole arrays can overwrite other users. Wait until pending check-ins sync.
-            if(!navigator.onLine || offlineAttendancePendingCount>0 || offlineAttendanceSyncRunning)return;
-            const date=localDateStr(), assignments=[];
-            const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
-            if(!org) return;
-            (org.members||[]).forEach(m=>getEffectiveDutyForDate(m.name,date).forEach(d=>assignments.push({...d,user:m.name})));
-            const list=(dbCache.guideAttendance[dbCache.currentOrgCode]||=[]); let changed=false;
-            assignments.forEach(d=>{
-                const exists=list.some(a=>a.user===d.user&&a.date===date&&a.type===d.dutyType&&a.time===d.time);
-                if(!exists && attendancePhase(date,d.time).phase==='absent'){
-                    list.unshift({id:Date.now()+Math.random(),user:d.user,date,type:d.dutyType,time:d.time,status:'결석',createdAt:new Date().toISOString(),dismissedByAdmin:false,auto:true}); changed=true;
-                }
-            });
-            if(changed) await syncSubColToFirestore('guide_attendance',dbCache.currentOrgCode,list);
-        }
+        // v55: The Supabase pg_cron job creates scheduled normal attendance.
+        // Never create automatic absences in the browser: a stale device can
+        // overwrite the server's attendance or an administrator's correction.
+        async function checkAttendanceDeadlines(){ return; }
         function attendanceStatusLabel(a){return a.status||'출석';}
         function attendanceDisplayStatus(status){return status==='출석'?'정상 출석':status;}
         let adminAttendanceEditRecordId=null;
@@ -4948,60 +4936,28 @@
             refreshGuideAttendanceWindow(); openModal('guide-attendance-modal');
         }
         function refreshGuideAttendanceWindow(){
-            const sel=document.getElementById('guide-att-assignment'), info=document.getElementById('guide-att-window-info'), btn=document.getElementById('guide-att-submit-btn');
-            const duty=(sel?._assignments||[])[Number(sel?.value||0)]; if(!duty||!info||!btn)return;
-            const date=sel.dataset.date, phase=attendancePhase(date,duty.time);
-            const scheduled=dutyDateTime(date,duty.time), start=new Date(scheduled-5*60000), normalEnd=new Date(scheduled.getTime()+60000), absentAt=new Date(scheduled.getTime()+40*60000);
-            const hm=d=>`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-            const already=(dbCache.guideAttendance[dbCache.currentOrgCode]||[]).find(a=>!a.deleted&&!a.auto&&a.user===dbCache.currentUser.name&&a.date===date&&a.type===duty.dutyType&&a.time===duty.time);
-            if(already){ info.innerHTML=`이미 <b>${attendanceStatusLabel(already)}</b> 처리된 일정입니다.`; btn.disabled=true; return; }
-            if(phase.phase==='early'){ info.innerHTML=`정상 출석 가능 시간은 <b>${hm(start)}~${hm(normalEnd)}</b>입니다. ${hm(normalEnd)} 이후에는 지각, ${hm(absentAt)} 이후에는 결석 처리됩니다.`; btn.disabled=true; }
-            else if(phase.phase==='present'){ info.innerHTML=`현재 <b class="text-emerald-600">정상 출석 가능</b> 시간입니다. (${hm(start)}~${hm(normalEnd)})`; btn.disabled=false; }
-            else if(phase.phase==='late'){ info.innerHTML=`현재 <b class="text-amber-600">지각 출석</b> 시간입니다. 지금 출석하면 지각으로 관리자에게 보고됩니다. ${hm(absentAt)} 이후에는 결석 처리됩니다.`; btn.disabled=false; }
-            else { info.innerHTML=`출석 마감 ${hm(absentAt)}이 지나 <b class="text-rose-600">결석</b> 처리 대상입니다. 버튼을 누른 시간을 결석으로 기록합니다.`; btn.disabled=false; if(navigator.onLine)checkAttendanceDeadlines(); }
-            if(!navigator.onLine)info.innerHTML+=`<div class="mt-2 font-bold text-amber-600">인터넷 없음: 버튼을 누른 시각을 기기에 먼저 저장합니다. 인터넷 복구 후 자동 전송됩니다.</div>`;
+            const sel=document.getElementById('guide-att-assignment');
+            const info=document.getElementById('guide-att-window-info');
+            const duty=(sel?._assignments||[])[Number(sel?.value||0)];
+            if(!duty||!info)return;
+            const date=sel.dataset.date;
+            const scheduled=dutyDateTime(date,duty.time);
+            const record=(dbCache.guideAttendance[dbCache.currentOrgCode]||[]).find(a=>
+                !a.deleted&&a.user===dbCache.currentUser.name&&a.date===date&&
+                a.type===duty.dutyType&&a.time===duty.time
+            );
+            if(record){
+                info.innerHTML=`<b>${date} · ${duty.time}</b><div class="mt-1 text-emerald-700 font-bold">현재 기록: ${attendanceDisplayStatus(attendanceStatusLabel(record))}</div><p class="mt-1">관리자가 출석 상태를 정정할 수 있습니다.</p>`;
+            }else if(new Date()<scheduled){
+                info.innerHTML=`<b>${date} · ${duty.time}</b><p class="mt-1">지도 시작 시간에 정상 출석으로 자동 기록될 예정입니다. 별도의 출석 버튼은 없습니다.</p>`;
+            }else{
+                info.innerHTML=`<b>${date} · ${duty.time}</b><p class="mt-1">서버에서 자동 출석 기록을 처리 중입니다. 인터넷 연결 후 잠시 뒤 새로고침해주세요.</p>`;
+            }
         }
         async function submitGuideAttendance(){
-            const sel=document.getElementById('guide-att-assignment');
-            const date=sel?.dataset.date;
-            const assignments=sel?._assignments||[];
-            const duty=assignments[Number(sel?.value||0)];
-            if(!date||!duty)return showAlert('출석할 지도 일정을 선택해주세요.');
-            // Capture the actual button-click time before any asynchronous operation.
-            const clickedAt=new Date();
-            const phase=attendancePhase(date,duty.time,clickedAt);
-            if(phase.phase==='early')return showAlert('아직 출석 가능 시간이 아닙니다. 배정 5분 전부터 출석할 수 있습니다.');
-            const list=(dbCache.guideAttendance[dbCache.currentOrgCode]||=[]);
-            if(list.some(a=>!a.deleted&&!a.auto&&a.user===dbCache.currentUser.name&&a.date===date&&a.type===duty.dutyType&&a.time===duty.time))return showAlert('이 지도 일정은 이미 출석 기록이 있습니다.');
-            const status=phase.phase==='present'?'출석':phase.phase==='late'?'지각':'결석';
-            const record={
-                id:String(clickedAt.getTime())+String(Math.floor(Math.random()*100000)).padStart(5,'0'),
-                user:dbCache.currentUser.name,date,type:duty.dutyType,time:duty.time,
-                status,clickedAt:clickedAt.toISOString(),createdAt:clickedAt.toISOString(),
-                offlineRecorded:!navigator.onLine,dismissedByAdmin:false
-            };
-            try{
-                await queueGuideAttendanceRecord(record);
-            }catch(e){
-                console.error('출석 로컬 저장 실패:',e);
-                return showAlert('기기에 출석을 저장하지 못했습니다. 저장 공간을 확인하고 다시 시도해주세요.');
-            }
-            closeModal('guide-attendance-modal');
-            updateHomeDashboardData();
-            if(!navigator.onLine){
-                showAlert(`${status} · ${clickedAt.toLocaleTimeString('ko-KR')} 버튼 클릭 시각 저장 완료. 인터넷 연결 후 서버로 전송됩니다.`);
-                return true;
-            }
-            const synced=await flushOfflineAttendanceQueue(true);
-            if(synced){
-                await checkCouncilServerChanges(true);
-                showAlert(`${status} 기록이 중앙 서버에 저장되었습니다. (클릭 시각 기준)`);
-            }else{
-                showAlert(`${status} · 기기에 안전하게 저장됐습니다. 연결이 회복되면 자동 전송합니다.`);
-            }
-            return true;
+            showAlert('v55부터 지도 출석은 시작 시간에 자동으로 처리됩니다. 출석 버튼을 누를 필요가 없습니다.');
+            return false;
         }
-
         function getManualContent(){const x=dbCache.manuals[dbCache.currentOrgCode]||[];return x[0]?.content||`1. 사복 착용 단속\n- 상의 사복 착용 시 교복 또는 체육복 겉옷 소지 여부를 확인합니다.\n\n2. 슬리퍼 및 신발 규정\n- 슬리퍼, 크록스, 어그 부츠 착용 금지.\n\n3. 명찰 미부착 규정\n- 규정된 명찰 상시 패용 여부 확인.\n\n[당일 지도 체크리스트]\n- 단정한 학생회 복장 착용\n- 지각생 및 규정 위반자 공정하게 기록\n- 위반 사유 확인 후 앱에 입력`;}
         function openManualModal(isAdmin){document.getElementById('manual-modal-title').innerText=isAdmin?'매뉴얼 수정':'매뉴얼 수정사항 요청';document.getElementById('manual-submit-btn').innerText=isAdmin?'매뉴얼 저장':'수정 요청 보내기';document.getElementById('manual-submit-btn').onclick=isAdmin?saveManual:submitManualRequest;document.getElementById('manual-edit-content').value=isAdmin?getManualContent():'';openModal('manual-modal');}
         function saveManual(){const content=document.getElementById('manual-edit-content').value.trim();if(!content)return showAlert('매뉴얼 내용을 입력해주세요.');dbCache.manuals[dbCache.currentOrgCode]=[{content,updatedAt:new Date().toISOString(),editor:dbCache.currentUser.name}];syncSubColToFirestore('manual',dbCache.currentOrgCode,dbCache.manuals[dbCache.currentOrgCode]);closeModal('manual-modal');switchTab('manual');showAlert('매뉴얼이 수정되었습니다.');}
@@ -5353,7 +5309,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=54',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=55',{scope:'./',updateViaCache:'none'});
         }
         // 삼성 인터넷/안드로이드 크롬: 사용자가 버튼을 누른 즉시 권한을 요청해야
         // 비동기 로그인/서비스워커 작업 때문에 사용자 제스처가 소실되는 문제를 줄일 수 있습니다.
@@ -5508,7 +5464,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=54',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=55',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
