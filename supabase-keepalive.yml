@@ -1,0 +1,33 @@
+name: Supabase daily activity check
+
+on:
+  schedule:
+    # Every day at 09:17 Korea time (00:17 UTC)
+    - cron: '17 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping-database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Query Supabase database
+        env:
+          SUPABASE_URL: https://epktuifzkbcesqbxkiwx.supabase.co
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_ANON_KEY}" ]; then
+            echo "::error::Set the SUPABASE_ANON_KEY repository secret first."
+            exit 1
+          fi
+          curl --fail-with-body --silent --show-error --retry 2 \
+            --connect-timeout 10 --max-time 30 \
+            --header "apikey: ${SUPABASE_ANON_KEY}" \
+            --header "Accept: application/json" \
+            "${SUPABASE_URL}/rest/v1/organizations?select=code&limit=1" \
+            --output /dev/null
+          echo "Supabase REST database query succeeded."
