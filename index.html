@@ -102,7 +102,7 @@
         }
 
     </style>
-    <link rel="manifest" href="./manifest.webmanifest?v=55">
+    <link rel="manifest" href="./manifest.webmanifest?v=56">
     <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
     <link rel="apple-touch-icon" href="./icon-192.png">
     <meta name="theme-color" content="#4f46e5">
@@ -707,7 +707,7 @@
 
                 <h3 class="text-lg font-bold text-slate-800">활동 대시보드 초기화 관리</h3>
                 <p class="text-[11px] text-slate-500 mt-2 leading-relaxed">
-                    기존 출석·회의 기록은 삭제하지 않고, 선택한 시점부터 활동 대시보드 집계만 다시 시작합니다.
+                    기존 출석 기록은 삭제하지 않고, 선택한 시점부터 지도 출석 횟수와 활동 시간 집계만 다시 시작합니다.
                 </p>
 
                 <button onclick="runBusyAction(this,'엑셀 생성 중...',()=>exportActivityDashboardExcel())"
@@ -2080,25 +2080,20 @@
                             <h3 class="text-xs font-bold text-slate-700"><i class="fa-solid fa-calendar-day mr-1.5"></i> 나의 지도 일정</h3>
                             <div id="home-duty-preview" class="text-xs text-slate-500">배정된 지도 일정을 확인하세요.</div>
                             <div id="home-attendance-alerts" class="space-y-2"></div>
-                            <div class="grid grid-cols-2 gap-2 mt-1">
-                                <button onclick="openGuideAttendanceModal()" class="py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs">자동 출석 확인</button>
-                                <button onclick="openSwapModal()" class="py-2 bg-slate-100 hover:bg-slate-200 text-indigo-600 rounded-xl font-bold text-xs transition">대체 근무 신청</button>
+                            <div class="mt-1">
+                                <button onclick="openSwapModal()" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs transition">대체 근무 신청</button>
                             </div>
                         </div>
                         <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
                             <h3 class="text-xs font-bold text-slate-700"><i class="fa-solid fa-chart-pie mr-1.5"></i> 나의 활동 대시보드 (지도 출석 1회당 1시간)</h3>
-                            <div class="grid grid-cols-3 gap-2 text-center pt-1">
-                                <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                                    <span class="text-[10px] text-slate-400 block font-semibold">지도 출석</span>
-                                    <span id="dash-crack" class="text-sm font-bold text-indigo-600">0회</span>
+                            <div class="grid grid-cols-2 gap-3 text-center pt-1">
+                                <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                    <span class="text-[11px] text-slate-500 block font-semibold">지도 출석</span>
+                                    <span id="dash-crack" class="text-lg font-bold text-indigo-600">0회</span>
                                 </div>
-                                <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                                    <span class="text-[10px] text-slate-400 block font-semibold">회의 참석</span>
-                                    <span id="dash-meeting" class="text-sm font-bold text-emerald-600">0회</span>
-                                </div>
-                                <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                                    <span class="text-[10px] text-slate-400 block font-semibold">활동 시간</span>
-                                    <span id="dash-time" class="text-sm font-bold text-amber-600">0시간</span>
+                                <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                    <span class="text-[11px] text-slate-500 block font-semibold">활동 시간</span>
+                                    <span id="dash-time" class="text-lg font-bold text-amber-600">0시간</span>
                                 </div>
                             </div>
                             ${currentUserIsAdmin()?`<button onclick="openActivityDashboardResetModal()" class="w-full py-2 bg-rose-50 text-rose-600 rounded-xl font-bold text-[11px] border border-rose-100">활동 대시보드 초기화 관리</button>`:''}
@@ -4505,8 +4500,6 @@
         function getActivityDashboardMetrics(name){
             const resetAt=getDashboardResetAtForMember(name);
             const att=(dbCache.guideAttendance[dbCache.currentOrgCode]||[]);
-            const meets=(dbCache.meetings[dbCache.currentOrgCode]||[]).filter(x=>x.scope!=='department');
-
             const validAttendance=att.filter(a=>
                 !a.deleted &&
                 canonicalMemberName(a.user)===canonicalMemberName(name) &&
@@ -4514,19 +4507,8 @@
                 (!resetAt || new Date(a.createdAt||`${a.date}T${a.time||'00:00'}`).getTime()>=resetAt)
             );
 
-            const meetingAttendance=meets.filter(m=>{
-                if(m.rsvps?.[name]!=='참석')return false;
-                if(!resetAt)return true;
-                const idTime=Number(m.id);
-                const eventTime=Number.isFinite(idTime)&&idTime>100000000000
-                    ? idTime
-                    : Date.parse(m.createdAt||m.time||'');
-                return Number.isFinite(eventTime)&&eventTime>=resetAt;
-            }).length;
-
             return {
                 guideAttendance:validAttendance.length,
-                meetingAttendance,
                 activityHours:validAttendance.length,
                 resetAt
             };
@@ -4567,7 +4549,6 @@
                     '반':p.class||'',
                     '번호(학번)':p.number||'',
                     '지도 출석(회)':metric.guideAttendance,
-                    '회의 참석(회)':metric.meetingAttendance,
                     '활동 시간(시간)':metric.activityHours,
                     '대시보드 집계 시작 시점':metric.resetAt?formatDashboardResetAt(metric.resetAt):'전체 기간'
                 };
@@ -4577,7 +4558,7 @@
             const ws=XLSX.utils.json_to_sheet(rows);
             ws['!cols']=[
                 {wch:6},{wch:12},{wch:12},{wch:9},{wch:9},{wch:12},
-                {wch:14},{wch:14},{wch:16},{wch:24}
+                {wch:14},{wch:16},{wch:24}
             ];
             XLSX.utils.book_append_sheet(wb,ws,'활동 대시보드');
 
@@ -4595,27 +4576,6 @@
                 const aws=XLSX.utils.json_to_sheet(attendance);
                 aws['!cols']=[{wch:12},{wch:12},{wch:16},{wch:10},{wch:10},{wch:10}];
                 XLSX.utils.book_append_sheet(wb,aws,'지도 출석 상세');
-            }
-
-            const meetingRows=[];
-            (dbCache.meetings[dbCache.currentOrgCode]||[]).filter(x=>x.scope!=='department').forEach(m=>{
-                (org.members||[]).forEach(member=>{
-                    const status=m.rsvps?.[member.name];
-                    if(!status)return;
-                    meetingRows.push({
-                        '회의':m.title||'',
-                        '일시':String(m.time||'').replace('T',' '),
-                        '장소':m.loc||'',
-                        '이름':member.name,
-                        '응답':status,
-                        '불참 사유':m.rsvpReasons?.[member.name]||''
-                    });
-                });
-            });
-            if(meetingRows.length){
-                const mws=XLSX.utils.json_to_sheet(meetingRows);
-                mws['!cols']=[{wch:24},{wch:20},{wch:16},{wch:12},{wch:10},{wch:28}];
-                XLSX.utils.book_append_sheet(wb,mws,'회의 참석 상세');
             }
 
             const array=XLSX.write(wb,{bookType:'xlsx',type:'array'});
@@ -4764,7 +4724,7 @@
             const member=(org.members||[]).find(m=>m.name===name);
             if(!member)return showAlert('해당 조직원을 찾을 수 없습니다.');
 
-            if(!confirm(`${name} 님의 활동 대시보드와 지도 출석 보고를 지금부터 0으로 다시 시작할까요?\n기존 원본 출석·회의 기록은 삭제되지 않고, 초기화 이전 기록만 집계/보고에서 숨겨집니다.`)){
+            if(!confirm(`${name} 님의 활동 대시보드와 지도 출석 보고를 지금부터 0으로 다시 시작할까요?\n기존 원본 출석 기록은 삭제되지 않고, 초기화 이전 기록만 집계/보고에서 숨겨집니다.`)){
                 return;
             }
 
@@ -4793,7 +4753,7 @@
                 return showAlert('관리자만 활동 대시보드를 초기화할 수 있습니다.');
             }
 
-            if(!confirm('조직에 있는 모든 사람의 활동 대시보드와 지도 출석 보고를 한번에 0부터 다시 시작할까요?\n기존 원본 출석·회의 기록은 삭제되지 않고, 초기화 이전 기록만 집계/보고에서 숨겨집니다.')){
+            if(!confirm('조직에 있는 모든 사람의 활동 대시보드와 지도 출석 보고를 한번에 0부터 다시 시작할까요?\n기존 원본 출석 기록은 삭제되지 않고, 초기화 이전 기록만 집계/보고에서 숨겨집니다.')){
                 return;
             }
 
@@ -4844,11 +4804,9 @@
 
             // 홈 화면이 현재 DOM에 없을 때도 오류가 나지 않도록 모두 존재 여부 확인
             const dashCrack=document.getElementById('dash-crack');
-            const dashMeeting=document.getElementById('dash-meeting');
             const dashTime=document.getElementById('dash-time');
 
             if(dashCrack)dashCrack.innerText=`${myMetrics.guideAttendance}회`;
-            if(dashMeeting)dashMeeting.innerText=`${myMetrics.meetingAttendance}회`;
             if(dashTime)dashTime.innerText=`${myMetrics.activityHours}시간`;
 
             const latest=meets[0];
@@ -4955,7 +4913,7 @@
             }
         }
         async function submitGuideAttendance(){
-            showAlert('v55부터 지도 출석은 시작 시간에 자동으로 처리됩니다. 출석 버튼을 누를 필요가 없습니다.');
+            showAlert('v56부터 지도 출석은 시작 시간에 자동으로 처리됩니다. 출석 버튼을 누를 필요가 없습니다.');
             return false;
         }
         function getManualContent(){const x=dbCache.manuals[dbCache.currentOrgCode]||[];return x[0]?.content||`1. 사복 착용 단속\n- 상의 사복 착용 시 교복 또는 체육복 겉옷 소지 여부를 확인합니다.\n\n2. 슬리퍼 및 신발 규정\n- 슬리퍼, 크록스, 어그 부츠 착용 금지.\n\n3. 명찰 미부착 규정\n- 규정된 명찰 상시 패용 여부 확인.\n\n[당일 지도 체크리스트]\n- 단정한 학생회 복장 착용\n- 지각생 및 규정 위반자 공정하게 기록\n- 위반 사유 확인 후 앱에 입력`;}
@@ -5309,7 +5267,7 @@
         }
         async function getPushRegistration(){
             if(!('serviceWorker' in navigator)) throw new Error('이 브라우저는 백그라운드 알림을 지원하지 않습니다.');
-            return navigator.serviceWorker.register('./sw.js?v=55',{scope:'./',updateViaCache:'none'});
+            return navigator.serviceWorker.register('./sw.js?v=56',{scope:'./',updateViaCache:'none'});
         }
         // 삼성 인터넷/안드로이드 크롬: 사용자가 버튼을 누른 즉시 권한을 요청해야
         // 비동기 로그인/서비스워커 작업 때문에 사용자 제스처가 소실되는 문제를 줄일 수 있습니다.
@@ -5464,7 +5422,7 @@
                 return false;
             }
         }
-        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=55',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
+        if('serviceWorker' in navigator) window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=56',{scope:'./',updateViaCache:'none'});await r.update();}catch(e){console.error(e)}});
 
         function currentUserIsAdmin(){
             const org=dbCache.orgs.find(o=>o.code===dbCache.currentOrgCode);
