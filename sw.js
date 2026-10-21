@@ -1,7 +1,7 @@
 
-/* Student Council PWA automatic attendance v55; online-first HTML, offline fallback. No Supabase API data is cached here. */
-const STATIC_CACHE = 'student-council-shell-v55';
-const CDN_CACHE = 'student-council-vendor-v55';
+/* Student Council PWA automatic attendance v56; online-first HTML, offline fallback. No Supabase API data is cached here. */
+const STATIC_CACHE = 'student-council-shell-v56';
+const CDN_CACHE = 'student-council-vendor-v56';
 const SHELL = ['./index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 const VENDORS = [
   'https://cdn.tailwindcss.com',
